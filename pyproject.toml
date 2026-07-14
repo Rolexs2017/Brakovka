@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brakovka"
+version = "0.3.0"
+description = "Brakovka unwind/wind controller and Qt HMI for Raspberry Pi"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "asyncua>=1.1.5",
+  "pymodbus>=3.7.4",
+  "pyserial>=3.5",
+  "gpiozero>=2.0.1",
+  "pigpio>=1.78",
+  "smbus2>=0.4.3",
+  "PySide6>=6.6.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6.0", "mypy>=1.11.0"]
+
+[tool.setuptools.packages.find]
+include = ["brakovka_pi*", "brakovka_hmi*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true

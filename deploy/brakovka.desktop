@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Brakovka
+Name[ru]=Браковка
+Comment=Brakovka controller + HMI
+Comment[ru]=Контроллер и панель оператора Браковка
+# Paths match Rolexs Pi layout; reinstall via install_desktop_icon.sh to rewrite absolute paths.
+Exec=/home/rolexs/rpi_python/deploy/run_brakovka.sh
+Path=/home/rolexs/rpi_python
+Icon=/home/rolexs/rpi_python/deploy/icons/brakovka.png
+Terminal=false
+Categories=Industrial;Engineering;Utility;
+StartupNotify=true
+Keywords=brakovka;gpio;hmi;

@@ -1,0 +1,29 @@
+[Unit]
+Description=Brakovka controller + HMI
+After=network.target
+
+[Service]
+Type=simple
+User=rolexs
+WorkingDirectory=/home/rolexs/rpi_python
+Environment=BRAKOVKA_HMI=1
+Environment=QT_IM_MODULE=none
+Environment=GTK_IM_MODULE=none
+Environment=XMODIFIERS=@im=none
+# Debian 13 / Trixie: use lgpio (pigpiod package is usually absent).
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+# Optional overrides:
+# Environment=BRAKOVKA_SETTINGS=/home/rolexs/rpi_python/brakovka_pi/settings.json
+# Environment=BRAKOVKA_SETTINGS_PASSWORD=4444
+# Environment=BRAKOVKA_EMU=0
+# System Python:
+# ExecStart=/usr/bin/python3 /home/rolexs/rpi_python/run_brakovka.py
+# Project venv (recommended):
+ExecStart=/home/rolexs/brk/bin/python /home/rolexs/rpi_python/run_brakovka.py
+Restart=on-failure
+RestartSec=3
+# Touch / kiosk displays often need a graphical session; if running under
+# LightDM/autologin, prefer a user systemd unit or start from ~/.xsession.
+
+[Install]
+WantedBy=multi-user.target

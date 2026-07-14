@@ -1,0 +1,87 @@
+{
+  "emulator": true,
+  "gpio": {
+    "btn_start": 23,
+    "btn_stop": 24,
+    "btn_jog": 25,
+    "btn_reverse": 8,
+    "btn_reset_wound": 7,
+    "brake_pwm": 13
+  },
+  "serial": {
+    "port": "/dev/serial0",
+    "baudrate": 115200,
+    "parity": "N",
+    "stopbits": 1,
+    "bytesize": 8,
+    "timeout_s": 0.5,
+    "retries": 3,
+    "unit_id": 1,
+    "de_delay_before_tx_s": 0.002,
+    "de_turnaround_s": 0.003,
+    "rs485_de": 16,
+    "reconnect_period_s": 2.0,
+    "fails_before_reconnect": 2
+  },
+  "vfd": {
+    "reg_freq": 8192,
+    "reg_cmd": 8193,
+    "reg_status": 8194,
+    "reg_fault": 8195,
+    "reg_freq_out": 8196,
+    "freq_scale": 100,
+    "cmd_forward": 1,
+    "cmd_reverse": 2,
+    "cmd_stop": 5
+  },
+  "opcua": {
+    "endpoint": "opc.tcp://0.0.0.0:4840/",
+    "server_name": "BrakovkaPi"
+  },
+  "ui": {
+    "window_title": "Brakovka HMI",
+    "fullscreen": true,
+    "width": 1280,
+    "height": 800,
+    "settings_password": "4444",
+    "sounds_enabled": true
+  },
+  "timing": {
+    "task_period_s": 0.01,
+    "opcua_publish_period_s": 0.1,
+    "opcua_poll_period_s": 0.05,
+    "vfd_status_poll_period_s": 0.2,
+    "vfd_cmd_period_s": 0.05,
+    "vfd_cmd_min_delta_hz": 0.05,
+    "watchdog_limit_s": 5.0
+  },
+  "emu": {
+    "gear_ratio": 0.2
+  },
+  "machine": {
+    "unwind_roll_length_m": 2000.0,
+    "core_diameter_mm": 76.0,
+    "material_thickness_mm": 0.2,
+    "roll_encoder_diameter_mm": 80.0,
+    "tension_setpoint_n": 150.0,
+    "tension_brake_gain_n": 500.0,
+    "target_length_m": 100.0,
+    "speed_setpoint_mpm": 60.0,
+    "slowdown_speed_mpm": 20.0,
+    "slowdown_start_pct": 90.0,
+    "accel_time_s": 5.0,
+    "decel_time_s": 5.0,
+    "jog_speed_mpm": 10.0,
+    "reverse_speed_mpm": 15.0,
+    "brake_delay_s": 1.0,
+    "pid_kp": 5.0,
+    "pid_ti": 2.0,
+    "pid_kd": 0.0,
+    "tension_brake_min_pct": 2.0,
+    "brake_max_pressure_pct": 100.0,
+    "max_ramp_speed_mpm": 300.0,
+    "encoder_spike_m": 2.0,
+    "emu_mpm_per_hz": 1.0,
+    "emu_motor_rpm_per_hz": 60.0
+  }
+}
