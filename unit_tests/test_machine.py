@@ -92,6 +92,32 @@ class TestMachineStateMachine(unittest.TestCase):
         m.update_state(Inputs(jog_level=False, estop_ok=True))
         self.assertEqual(m.telem.state, MachineState.STOPPING)
 
+    def test_fault_blocks_start_and_stops_run(self) -> None:
+        m = Machine()
+        m.telem.modbus_error = True
+        m.update_state(Inputs(start_pulse=True, estop_ok=True))
+        self.assertEqual(m.telem.state, MachineState.IDLE)
+
+        m.telem.modbus_error = False
+        m.update_state(Inputs(start_pulse=True, estop_ok=True))
+        self.assertEqual(m.telem.state, MachineState.RUN)
+        m.telem.vfd_fault = True
+        self.assertTrue(m.fault_stop("test"))
+        self.assertEqual(m.telem.state, MachineState.STOPPING)
+
+    def test_calibrated_roll_diameter(self) -> None:
+        from math import pi
+
+        from brakovka_pi.encoder import COUNTS_PER_REV, calibrated_roll_diameter_m
+
+        d = 0.08
+        length = 10.0
+        pulses = int(round(length * COUNTS_PER_REV / (pi * d)))
+        d_back = calibrated_roll_diameter_m(length, pulses)
+        self.assertIsNotNone(d_back)
+        assert d_back is not None
+        self.assertAlmostEqual(d_back, d, places=5)
+
     def test_unwind_length_setpoint_updates_diameter(self) -> None:
         m = Machine()
         m.apply_setpoint("material_thickness_mm", 0.2)

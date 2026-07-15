@@ -11,7 +11,7 @@ from .config import GpioConfig
 class BrakePwm:
     def __init__(self, gpio: GpioConfig | None = None) -> None:
         gpio = gpio or GpioConfig()
-        # gpiozero will use pigpio backend if pigpiod is running (recommended).
+        # gpiozero pin factory is set by run_brakovka / GPIOZERO_PIN_FACTORY (lgpio on Trixie).
         self._pwm = None
         if PWMOutputDevice is not None:
             try:

@@ -20,6 +20,7 @@ from brakovka_hmi.services.poller import PollService
 from brakovka_hmi.snapshot import MachineSnapshot, StatusFlag
 from brakovka_hmi.sounds import play_alarm, play_error, play_ok
 from brakovka_hmi.ui import theme as t
+from brakovka_hmi.ui.screen_journal import JournalScreen
 from brakovka_hmi.ui.screen_main import MainScreen
 from brakovka_hmi.ui.screen_roll import RollScreen
 from brakovka_hmi.ui.screen_settings import SettingsScreen
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
             ("Рулон", 1),
             ("Настройки", 2),
             ("Статус", 3),
+            ("Журнал аварий", 4),
         ]
         for text, index in nav_items:
             btn = QPushButton(text)
@@ -123,12 +125,14 @@ class MainWindow(QMainWindow):
         self._page_roll = RollScreen(bridge)
         self._page_settings = SettingsScreen(bridge)
         self._page_status = StatusScreen()
+        self._page_journal = JournalScreen()
         self._page_settings.quit_requested.connect(self.close)
         for page in (
             self._page_main,
             self._page_roll,
             self._page_settings,
             self._page_status,
+            self._page_journal,
         ):
             self._stack.addWidget(page)
         content_layout.addWidget(self._stack)
@@ -155,6 +159,7 @@ class MainWindow(QMainWindow):
             self._page_roll,
             self._page_settings,
             self._page_status,
+            self._page_journal,
         )
         if 0 <= index < len(pages):
             return pages[index]
@@ -206,6 +211,7 @@ class MainWindow(QMainWindow):
         self._page_main.update_snapshot(snap)
         self._page_roll.update_snapshot(snap)
         self._page_status.update_snapshot(snap)
+        self._page_settings.update_snapshot(snap)
         self._check_alarms(snap)
 
     def _check_alarms(self, snap: MachineSnapshot) -> None:

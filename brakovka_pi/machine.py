@@ -41,6 +41,8 @@ class MachineParams:
     brake_max_pressure_pct: float = 100.0
 
     encoder_spike_m: float = 2.0
+    encoder_speed_filter_n: int = 5
+    encoder_invert: bool = False
 
     pid_kp: float = 5.0
     pid_ti: float = 2.0
@@ -74,6 +76,7 @@ class Telemetry:
     unwind_diameter_mm: float = 0.0
     encoder_error: bool = False
     magnet_ok: bool = True
+    encoder_pulses: int = 0
     watchdog_fault: bool = False
     vfd_status_word: int = 0
     vfd_error_code: int = 0
@@ -125,22 +128,39 @@ class Machine:
         self.telem.ramp_speed_mpm = 0.0
         self.reset_pid()
 
+    def fault_stop(self, reason: str = "") -> bool:
+        """Stop motion on fault. Returns True if STOPPING was entered."""
+        if self.telem.state in (MachineState.IDLE, MachineState.STOPPING):
+            return False
+        self._enter_stopping()
+        _ = reason
+        return True
+
     def update_state(self, inp: Inputs) -> None:
         self.telem.wound_progress_pct = self.wound_progress_pct()
         st = self.telem.state
+        fault_block = self.telem.vfd_fault or self.telem.modbus_error
         if st == MachineState.IDLE:
-            if inp.start_pulse and inp.estop_ok and not inp.stop_pulse and not inp.jog_level and not inp.reverse_level:
+            if (
+                inp.start_pulse
+                and inp.estop_ok
+                and not inp.stop_pulse
+                and not inp.jog_level
+                and not inp.reverse_level
+                and not fault_block
+            ):
                 self.telem.state = MachineState.RUN
                 self._ramp_speed_mpm = 0.0
-            elif inp.jog_level and inp.estop_ok:
+            elif inp.jog_level and inp.estop_ok and not fault_block:
                 self.telem.state = MachineState.JOG
-            elif inp.reverse_level and inp.estop_ok:
+            elif inp.reverse_level and inp.estop_ok and not fault_block:
                 self.telem.state = MachineState.REVERSE
         elif st == MachineState.RUN:
             stop_request = (
                 inp.stop_pulse
                 or (not inp.estop_ok)
                 or self.should_stop_at_target_length()
+                or fault_block
             )
             if stop_request:
                 self._enter_stopping()
@@ -151,16 +171,17 @@ class Machine:
                 inp.stop_pulse
                 or (not inp.estop_ok)
                 or self.should_stop_at_target_length()
+                or fault_block
             )
             if stop_request:
                 self._enter_stopping()
             elif not self.should_enter_slowdown():
                 self.telem.state = MachineState.RUN
         elif st == MachineState.JOG:
-            if not inp.jog_level:
+            if (not inp.jog_level) or fault_block:
                 self._enter_stopping()
         elif st == MachineState.REVERSE:
-            if not inp.reverse_level:
+            if (not inp.reverse_level) or fault_block:
                 self._enter_stopping()
         elif st == MachineState.STOPPING:
             self._ramp_speed_mpm = 0.0
@@ -336,6 +357,9 @@ class Machine:
             return
         if name == "roll_encoder_diameter_mm":
             self.params.roll_diameter_m = clamp(name, value) / 1000.0
+            return
+        if name == "encoder_invert":
+            self.params.encoder_invert = bool(clamp(name, value))
             return
 
         sp = SETPOINTS[name]

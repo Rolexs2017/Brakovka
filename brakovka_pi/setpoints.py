@@ -253,6 +253,14 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         persist=True,
         unit_note="%",
     ),
+    _sp(
+        "encoder_invert",
+        ui_key="encoder_invert",
+        lo=0.0,
+        hi=1.0,
+        persist=True,
+        unit_note="0/1 invert measuring-roller direction",
+    ),
 )
 
 SETPOINTS: dict[str, SetpointDef] = {s.key: s for s in _SETPOINT_LIST}
@@ -303,11 +311,16 @@ def machine_params_to_ui(params: Any) -> dict[str, float]:
     return out
 
 
-def machine_params_to_json(params: Any) -> dict[str, float]:
+def machine_params_to_json(params: Any) -> dict[str, Any]:
     """Map MachineParams → settings.json ``machine`` section (mm where needed)."""
-    out: dict[str, float] = {}
+    out: dict[str, Any] = {}
     for sp in _SETPOINT_LIST:
         if not sp.persist or sp.json_key is None:
             continue
-        out[sp.json_key] = _value_from_params(params, sp)
+        value = _value_from_params(params, sp)
+        # Keep boolean flags as JSON bools (not 0.0/1.0).
+        if sp.key == "encoder_invert":
+            out[sp.json_key] = bool(value)
+        else:
+            out[sp.json_key] = value
     return out

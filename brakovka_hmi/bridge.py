@@ -114,12 +114,6 @@ class LocalBridge:
                 reset_wound=bool(pulses & int(CmdBit.RESET_WOUND)),
             ).as_dict()
 
-    def motion_active(self) -> bool:
-        with self._lock:
-            if self._machine is None:
-                return False
-            return self._machine.is_motion_active()
-
     def write_settings(self, values: dict[str, float]) -> bool:
         """Apply setpoints from HMI only when operator presses Save / Reset roll."""
         with self._lock:
@@ -179,6 +173,58 @@ class LocalBridge:
             log.exception("Failed to persist emulator flag to settings.json")
             return False
 
+    def get_encoder_invert(self) -> bool:
+        with self._lock:
+            m = self._machine
+            if m is None:
+                return False
+            return bool(m.params.encoder_invert)
+
+    def set_encoder_invert(self, invert: bool) -> bool:
+        """Apply encoder direction invert immediately and persist to settings.json."""
+        with self._lock:
+            m = self._machine
+            if m is None or not self._running:
+                return False
+            m.params.encoder_invert = bool(invert)
+            try:
+                save_machine_section({"encoder_invert": bool(invert)})
+            except Exception:
+                log.exception("Failed to persist encoder_invert")
+                return False
+            return True
+
+    def calibrate_roll_diameter(self, true_length_m: float) -> dict[str, float] | None:
+        """
+        Калибровка мерного ролика: D = L · 4096 / (π · N).
+        Returns {pulses, length_m, diameter_mm} or None on error.
+        """
+        from brakovka_pi.encoder import calibrated_roll_diameter_m
+
+        with self._lock:
+            m = self._machine
+            if m is None or not self._running:
+                return None
+            if not m.allow_roll_edit():
+                return None
+            pulses = int(m.telem.encoder_pulses)
+            d_m = calibrated_roll_diameter_m(float(true_length_m), pulses)
+            if d_m is None:
+                return None
+            dia_mm = d_m * 1000.0
+            m.apply_setpoint("roll_encoder_diameter_mm", dia_mm)
+            try:
+                save_machine_section(machine_params_to_json(m.params))
+            except Exception:
+                log.exception("Failed to persist calibrated roll diameter")
+                return None
+            self._opc_sync_pending = True
+            return {
+                "pulses": float(pulses),
+                "length_m": float(true_length_m),
+                "diameter_mm": float(m.params.roll_diameter_m * 1000.0),
+            }
+
     def read_settings(self) -> dict[str, float] | None:
         with self._lock:
             m = self._machine
@@ -233,6 +279,7 @@ class LocalBridge:
                 progress_pct=float(t.wound_progress_pct),
                 tension_n=float(t.tension_n),
                 vfd_freq_out_hz=float(t.vfd_freq_out_hz),
+                encoder_pulses=int(t.encoder_pulses),
                 target_length_m=float(p.target_length_m),
                 gpio_available=bool(g.available),
                 gpio_start=bool(g.start),

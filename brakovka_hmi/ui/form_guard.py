@@ -49,10 +49,6 @@ class EditableFormMixin:
                 signal.connect(self._mark_form_dirty)
             widget.installEventFilter(self._focus_filter)
 
-    @property
-    def form_is_dirty(self) -> bool:
-        return bool(getattr(self, "_form_dirty", False))
-
     def _notify_dirty_changed(self) -> None:
         cb = getattr(self, "_on_dirty_changed", None)
         if callable(cb):

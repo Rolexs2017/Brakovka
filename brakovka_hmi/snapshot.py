@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import IntFlag
 
 from brakovka_pi.state import STATE_NAMES_RU as STATE_NAMES
-from brakovka_pi.state import MOVING_STATES, RUN_LIKE_STATES, MachineState
+from brakovka_pi.state import MOVING_STATES, MachineState
 
 # Re-export for HMI screens
 __all__ = [
@@ -14,7 +14,6 @@ __all__ = [
     "STATE_NAMES",
     "STATE_FROM_NAME",
     "MOVING_STATES",
-    "RUN_LIKE_STATES",
     "PULSE_CMD_BITS",
     "HELD_CMD_BITS",
     "MachineSnapshot",
@@ -67,6 +66,7 @@ class MachineSnapshot:
     progress_pct: float = 0.0
     tension_n: float = 0.0
     vfd_freq_out_hz: float = 0.0
+    encoder_pulses: int = 0
     # Shown on main screen; also available via settings poll.
     target_length_m: float = 0.0
     # Raw GPIO button levels (pressed = True). Pins from settings/gpio.

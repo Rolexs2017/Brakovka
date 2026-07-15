@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -9,6 +11,16 @@ from pathlib import Path
 _LOG_FMT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 _configured = False
+
+_LINE_RE = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+"
+    r"(?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+"
+    r"(?P<name>[^:]+):\s*"
+    r"(?P<msg>.*)$"
+)
+
+INFO_LOG_NAME = "brakovka_info.log"
+ERROR_LOG_NAME = "brakovka_error.log"
 
 
 class _LevelFilter(logging.Filter):
@@ -89,3 +101,102 @@ def setup_logging(log_dir: Path | None = None) -> Path:
         error_path.name,
     )
     return directory
+
+
+def current_log_dir() -> Path:
+    return Path(getattr(setup_logging, "_log_dir", default_log_dir()))
+
+
+@dataclass(frozen=True)
+class JournalEntry:
+    timestamp: str
+    level: str
+    logger: str
+    message: str
+    raw: str
+
+    @property
+    def is_alarm(self) -> bool:
+        return self.level in ("ERROR", "CRITICAL", "WARNING")
+
+    @property
+    def sort_key(self) -> str:
+        return self.timestamp
+
+
+def _tail_text_lines(path: Path, max_lines: int) -> list[str]:
+    if max_lines <= 0 or not path.is_file():
+        return []
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            block = 8192
+            data = b""
+            while size > 0 and data.count(b"\n") <= max_lines:
+                step = min(block, size)
+                size -= step
+                fh.seek(size)
+                data = fh.read(step) + data
+            text = data.decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    lines = text.splitlines()
+    return lines[-max_lines:]
+
+
+def _parse_line(line: str) -> JournalEntry | None:
+    text = line.strip()
+    if not text:
+        return None
+    m = _LINE_RE.match(text)
+    if not m:
+        return JournalEntry(
+            timestamp="",
+            level="INFO",
+            logger="",
+            message=text,
+            raw=text,
+        )
+    return JournalEntry(
+        timestamp=m.group("ts"),
+        level=m.group("level"),
+        logger=m.group("name").strip(),
+        message=m.group("msg").strip(),
+        raw=text,
+    )
+
+
+def read_journal_entries(
+    *,
+    log_dir: Path | None = None,
+    max_per_file: int = 400,
+    alarms_only: bool = False,
+    info_only: bool = False,
+) -> list[JournalEntry]:
+    """Merge recent lines from info + error logs (newest first)."""
+    directory = log_dir or current_log_dir()
+    raw_lines: list[str] = []
+    raw_lines.extend(_tail_text_lines(directory / INFO_LOG_NAME, max_per_file))
+    raw_lines.extend(_tail_text_lines(directory / ERROR_LOG_NAME, max_per_file))
+
+    entries: list[JournalEntry] = []
+    for line in raw_lines:
+        entry = _parse_line(line)
+        if entry is None:
+            continue
+        if alarms_only and not entry.is_alarm:
+            continue
+        if info_only and entry.is_alarm:
+            continue
+        entries.append(entry)
+
+    entries.sort(key=lambda e: e.sort_key, reverse=True)
+    seen: set[str] = set()
+    unique: list[JournalEntry] = []
+    for e in entries:
+        if e.raw in seen:
+            continue
+        seen.add(e.raw)
+        unique.append(e)
+    return unique

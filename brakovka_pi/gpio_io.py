@@ -4,9 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 import logging
 import os
-import pwd
 import sys
 from time import monotonic
+
+try:
+    import pwd
+except ImportError:  # Windows
+    pwd = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 
@@ -75,15 +79,19 @@ def _gpiochip_ids() -> list[int]:
 def _permission_hint() -> str:
     chips = sorted(Path("/dev").glob("gpiochip*"))
     chip_note = ", ".join(p.name for p in chips) if chips else "нет /dev/gpiochip*"
-    user = pwd.getpwuid(os.getuid()).pw_name
-    try:
-        import grp
+    if pwd is None:
+        user = os.getenv("USERNAME") or os.getenv("USER") or "?"
+        groups: set[str] = set()
+    else:
+        user = pwd.getpwuid(os.getuid()).pw_name
+        try:
+            import grp
 
-        pw = pwd.getpwuid(os.getuid())
-        groups = {grp.getgrgid(g).gr_name for g in os.getgroups()}
-        groups.add(grp.getgrgid(pw.pw_gid).gr_name)
-    except Exception:
-        groups = set()
+            pw = pwd.getpwuid(os.getuid())
+            groups = {grp.getgrgid(g).gr_name for g in os.getgroups()}
+            groups.add(grp.getgrgid(pw.pw_gid).gr_name)
+        except Exception:
+            groups = set()
     group_note = ",".join(sorted(groups)) if groups else "?"
     hint = f"python={sys.executable}; chips=[{chip_note}]; user={user} groups=[{group_note}]"
     if "gpio" not in groups:

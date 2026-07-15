@@ -107,6 +107,8 @@ class MachineConfig:
     brake_max_pressure_pct: float = 100.0
     max_ramp_speed_mpm: float = 300.0
     encoder_spike_m: float = 2.0
+    encoder_speed_filter_n: int = 5
+    encoder_invert: bool = False
     emu_mpm_per_hz: float = 1.0
     emu_motor_rpm_per_hz: float = 60.0
 
@@ -134,6 +136,8 @@ class MachineConfig:
         p.brake_max_pressure_pct = self.brake_max_pressure_pct
         p.max_ramp_speed_mpm = self.max_ramp_speed_mpm
         p.encoder_spike_m = self.encoder_spike_m
+        p.encoder_speed_filter_n = self.encoder_speed_filter_n
+        p.encoder_invert = self.encoder_invert
         p.emu_mpm_per_hz = self.emu_mpm_per_hz
         p.emu_motor_rpm_per_hz = self.emu_motor_rpm_per_hz
         machine.sync_start_diameter_from_roll_length()
@@ -288,6 +292,10 @@ def load_runtime_config():
             lo=0.01,
             hi=100.0,
         ),
+        encoder_speed_filter_n=max(
+            1, int(machine_raw.get("encoder_speed_filter_n", 5))
+        ),
+        encoder_invert=bool(machine_raw.get("encoder_invert", False)),
         emu_mpm_per_hz=_machine_clamp(
             "emu_mpm_per_hz", float(machine_raw.get("emu_mpm_per_hz", 1.0))
         ),

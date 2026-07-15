@@ -268,4 +268,25 @@ def build_stylesheet() -> str:
         background-color: {t.ACCENT};
         border-radius: 5px;
     }}
+    QListWidget#journalList {{
+        background-color: {t.PANEL};
+        border: 1px solid {t.BORDER};
+        border-radius: 10px;
+        color: {t.TEXT};
+        font-size: 11pt;
+        padding: 4px;
+        outline: none;
+    }}
+    QListWidget#journalList::item {{
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(0, 212, 255, 0.18);
+        min-height: 48px;
+    }}
+    QListWidget#journalList::item:selected {{
+        background-color: rgba(255, 107, 53, 0.18);
+    }}
+    QLabel#journalHint {{
+        color: {t.TEXT_DIM};
+        font-size: 9pt;
+    }}
     """

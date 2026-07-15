@@ -34,15 +34,6 @@ class Sound(str, Enum):
     ALARM = "alarm"
 
 
-def set_enabled(enabled: bool) -> None:
-    global _enabled
-    _enabled = bool(enabled)
-
-
-def is_enabled() -> bool:
-    return _enabled
-
-
 def _write_tone(
     path: Path,
     *,

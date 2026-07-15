@@ -41,12 +41,14 @@ class StatusScreen(QWidget):
         self._brake = ValueCard("Тормоз", "%")
         self._freq = ValueCard("Частота ПЧ", "Гц")
         self._tension = ValueCard("Натяжение", "Н")
+        self._enc_pulses = ValueCard("Импульсы энкодера (накопительный)")
         cards.addWidget(self._state, 0, 0)
         cards.addWidget(self._speed, 0, 1)
         cards.addWidget(self._motor, 1, 0)
         cards.addWidget(self._brake, 1, 1)
         cards.addWidget(self._freq, 2, 0)
         cards.addWidget(self._tension, 2, 1)
+        cards.addWidget(self._enc_pulses, 3, 0)
         root.addLayout(cards)
 
         lamps_title = QLabel("Флаги статуса")
@@ -96,6 +98,7 @@ class StatusScreen(QWidget):
         self._brake.set_value(f"{snap.brake_pct:.1f}")
         self._freq.set_value(f"{snap.vfd_freq_out_hz:.1f}")
         self._tension.set_value(f"{snap.tension_n:.1f}")
+        self._enc_pulses.set_value(f"{snap.encoder_pulses}")
 
         flags = snap.status_flags
         for bit, lamp in self._lamps:

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from brakovka_hmi.bridge import LocalBridge
+from brakovka_hmi.snapshot import MOVING_STATES, MachineSnapshot
 from brakovka_hmi.sounds import play_error, play_ok
 from brakovka_hmi.ui.form_guard import EditableFormMixin
 from brakovka_hmi.ui.virtual_keyboard import TouchDoubleSpinBox, TouchSpinBox
@@ -41,23 +42,23 @@ class SettingsScreen(EditableFormMixin, QWidget):
         title_row.addWidget(self._dirty_label)
         root.addLayout(title_row)
 
-        info = QLabel(
-            "Локальный контроллер (in-process). Уставки с панели применяются "
-            "только по «Сохранить уставки». OPC-UA / SCADA — отдельно "
-            "(изменение Setpoints или Commands/ApplySetpoints). "
-            "Нажмите на поле — откроется цифровая клавиатура."
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
-        root.addWidget(info)
-
         params_row = QHBoxLayout()
-        params_row.setSpacing(24)
+        params_row.setSpacing(16)
 
         left_form = QFormLayout()
-        left_form.setVerticalSpacing(6)
+        left_form.setVerticalSpacing(4)
+        left_form.setHorizontalSpacing(10)
+        left_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        )
         right_form = QFormLayout()
-        right_form.setVerticalSpacing(6)
+        right_form.setVerticalSpacing(4)
+        right_form.setHorizontalSpacing(10)
+        right_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        )
+
+        field_w = 140
 
         self._speed = TouchDoubleSpinBox(keypad_title="Рабочая скорость")
         self._speed.setRange(0.0, 500.0)
@@ -114,6 +115,22 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._roll_dia.setRange(20, 1000)
         self._roll_dia.setSuffix(" мм")
 
+        for w in (
+            self._speed,
+            self._tension,
+            self._jog,
+            self._reverse,
+            self._slowdown,
+            self._accel,
+            self._decel,
+            self._brake_delay,
+            self._kp,
+            self._ti,
+            self._kd,
+            self._roll_dia,
+        ):
+            w.setFixedWidth(field_w)
+
         left_form.addRow("Рабочая скорость", self._speed)
         left_form.addRow("Натяжение", self._tension)
         left_form.addRow("Скорость JOG", self._jog)
@@ -126,11 +143,52 @@ class SettingsScreen(EditableFormMixin, QWidget):
         right_form.addRow("PID Kp", self._kp)
         right_form.addRow("PID Ti", self._ti)
         right_form.addRow("PID Kd", self._kd)
-        right_form.addRow("Диаметр мерительного ролика", self._roll_dia)
+        right_form.addRow("Диаметр мерн. ролика", self._roll_dia)
 
         params_row.addLayout(left_form, stretch=1)
         params_row.addLayout(right_form, stretch=1)
         root.addLayout(params_row)
+
+        cal_box = QVBoxLayout()
+        cal_box.setSpacing(4)
+        cal_title = QLabel("Калибровка мерного ролика")
+        cal_title.setStyleSheet("color: #8aa4b8; margin-top: 2px;")
+        cal_box.addWidget(cal_title)
+
+        cal_row = QHBoxLayout()
+        cal_row.setSpacing(10)
+        self._cal_pulses = QLabel("Импульсы: —")
+        self._cal_pulses.setStyleSheet("color: #e8f1f8; font-size: 11pt;")
+        self._cal_length = TouchDoubleSpinBox(keypad_title="Фактическая длина")
+        self._cal_length.setRange(0.01, 10000.0)
+        self._cal_length.setDecimals(2)
+        self._cal_length.setSuffix(" м")
+        self._cal_length.setValue(10.0)
+        self._cal_length.setFixedWidth(field_w)
+        self._btn_calibrate = QPushButton("Калибровать ролик")
+        self._btn_calibrate.setObjectName("cmd")
+        cal_row.addWidget(self._cal_pulses)
+        cal_row.addWidget(QLabel("Факт. длина"))
+        cal_row.addWidget(self._cal_length)
+        cal_row.addWidget(self._btn_calibrate)
+        cal_row.addStretch()
+        cal_box.addLayout(cal_row)
+        root.addLayout(cal_box)
+
+        invert_row = QHBoxLayout()
+        invert_row.setSpacing(12)
+        self._btn_invert = QPushButton()
+        self._btn_invert.setObjectName("cmd")
+        self._btn_invert.setMinimumWidth(280)
+        self._invert_hint = QLabel(
+            "Меняет знак направления мерного ролика (намотка / размотка). "
+            "Применяется сразу."
+        )
+        self._invert_hint.setWordWrap(True)
+        self._invert_hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        invert_row.addWidget(self._btn_invert)
+        invert_row.addWidget(self._invert_hint, stretch=1)
+        root.addLayout(invert_row)
 
         emu_row = QHBoxLayout()
         emu_row.setSpacing(12)
@@ -157,7 +215,11 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._btn_save.clicked.connect(self._save)
         self._btn_quit.clicked.connect(self.quit_requested.emit)
         self._btn_emu.clicked.connect(self._toggle_emulator)
+        self._btn_invert.clicked.connect(self._toggle_encoder_invert)
+        self._btn_calibrate.clicked.connect(self._calibrate_roll)
 
+        self._last_pulses = 0
+        self._encoder_invert = False
         self._form_widgets_list = (
             self._speed,
             self._tension,
@@ -178,19 +240,80 @@ class SettingsScreen(EditableFormMixin, QWidget):
         )
         root.addStretch()
         self._refresh_emulator_ui()
+        self._refresh_invert_ui()
 
     def showEvent(self, event) -> None:  # noqa: ANN001
         super().showEvent(event)
         self._refresh_emulator_ui()
+        self._refresh_invert_ui()
+
+    def update_snapshot(self, snap: MachineSnapshot) -> None:
+        self._last_pulses = int(snap.encoder_pulses)
+        self._cal_pulses.setText(f"Импульсы: {self._last_pulses}")
+        moving = snap.state in MOVING_STATES
+        self._btn_calibrate.setEnabled(snap.connected and not moving)
+        self._btn_invert.setEnabled(snap.connected)
 
     def _on_dirty_changed(self, dirty: bool) -> None:
         self._dirty_label.setText("Не сохранено" if dirty else "")
+
+    def _calibrate_roll(self) -> None:
+        length_m = float(self._cal_length.value())
+        pulses = self._last_pulses
+        if pulses <= 0 or length_m <= 0:
+            play_error()
+            QMessageBox.warning(
+                self,
+                "Калибровка",
+                "Нужны импульсы > 0 и фактическая длина > 0.\n"
+                "Сбросьте метраж, протяните известную длину и повторите.",
+            )
+            return
+        from brakovka_pi.encoder import calibrated_roll_diameter_m
+
+        preview_m = calibrated_roll_diameter_m(length_m, pulses)
+        if preview_m is None:
+            play_error()
+            return
+        preview_mm = preview_m * 1000.0
+        reply = QMessageBox.question(
+            self,
+            "Калибровка ролика",
+            f"Импульсы: {pulses}\n"
+            f"Длина: {length_m:.2f} м\n"
+            f"Новый диаметр: {preview_mm:.1f} мм\n\n"
+            "Применить и сохранить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        result = self._bridge.calibrate_roll_diameter(length_m)
+        if result is None:
+            play_error()
+            QMessageBox.warning(
+                self,
+                "Калибровка",
+                "Не удалось применить. Станок должен быть в ожидании.",
+            )
+            return
+        play_ok()
+        self._roll_dia.blockSignals(True)
+        self._roll_dia.setValue(int(round(result["diameter_mm"])))
+        self._roll_dia.blockSignals(False)
+        self.clear_form_dirty()
+        QMessageBox.information(
+            self,
+            "Калибровка",
+            f"Диаметр ролика: {result['diameter_mm']:.1f} мм",
+        )
 
     def apply_settings_from_device(self, settings: dict) -> None:
         if self.form_is_locked():
             return
         self._apply_settings(settings)
         self._refresh_emulator_ui()
+        self._refresh_invert_ui(settings)
 
     def _apply_settings(self, settings: dict) -> None:
         widgets = self._form_widgets_list
@@ -212,6 +335,32 @@ class SettingsScreen(EditableFormMixin, QWidget):
 
         for w in widgets:
             w.blockSignals(False)
+
+    def _refresh_invert_ui(self, settings: dict | None = None) -> None:
+        if settings is not None and "encoder_invert" in settings:
+            self._encoder_invert = bool(settings.get("encoder_invert"))
+        else:
+            try:
+                self._encoder_invert = bool(self._bridge.get_encoder_invert())
+            except Exception:
+                pass
+        self._btn_invert.setText(
+            "Инверт энкодера: ВКЛ" if self._encoder_invert else "Инверт энкодера: ВЫКЛ"
+        )
+
+    def _toggle_encoder_invert(self) -> None:
+        new_value = not self._encoder_invert
+        if self._bridge.set_encoder_invert(new_value):
+            play_ok()
+            self._encoder_invert = new_value
+            self._refresh_invert_ui()
+        else:
+            play_error()
+            QMessageBox.warning(
+                self,
+                "Инверт энкодера",
+                "Не удалось применить. Нет связи с контроллером.",
+            )
 
     def _refresh_emulator_ui(self) -> None:
         try:
@@ -292,3 +441,4 @@ class SettingsScreen(EditableFormMixin, QWidget):
     def set_commands_enabled(self, enabled: bool) -> None:
         self._btn_save.setEnabled(enabled)
         self._btn_emu.setEnabled(enabled)
+        self._btn_invert.setEnabled(enabled)
