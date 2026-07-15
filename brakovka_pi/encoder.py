@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import fabs, pi
+import logging
+import threading
+from time import monotonic
 
 from .as5600 import AS5600_ADDR, STATUS_MD, As5600
 
 # AS5600 raw counts per full revolution of the measuring roller.
 COUNTS_PER_REV = 4096
+
+log = logging.getLogger(__name__)
 
 
 def calibrated_roll_diameter_m(true_length_m: float, pulses: int) -> float | None:
@@ -194,3 +199,105 @@ class Encoder:
             speed_mpm = self._speed_filt.update(raw_speed)
 
         return self._telem(speed_mpm=speed_mpm, ok=True, magnet_ok=magnet_ok)
+
+
+class ThreadedEncoder:
+    """
+    Отдельный поток: I2C AS5600 → импульсы → скорость/метраж.
+
+    Контроллер только читает snapshot() и шлёт команды сброса/настроек.
+    """
+
+    def __init__(self, encoder: Encoder, *, period_s: float = 0.01) -> None:
+        self._enc = encoder
+        self._period_s = max(0.002, float(period_s))
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._telem = EncoderTelemetry()
+        self._wound_enable = True
+        self._pending_reset_wound = False
+        self._pending_reset_unwind = False
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="brakovka-encoder",
+            daemon=True,
+        )
+        self._thread.start()
+        log.info("Encoder thread started (period=%.3f s)", self._period_s)
+
+    def stop(self, timeout_s: float = 2.0) -> None:
+        self._stop.set()
+        th = self._thread
+        if th is not None and th.is_alive():
+            th.join(timeout=timeout_s)
+        self._thread = None
+
+    def close(self) -> None:
+        self.stop()
+        with self._lock:
+            self._enc.close()
+
+    def snapshot(self) -> EncoderTelemetry:
+        with self._lock:
+            return replace(self._telem)
+
+    def set_wound_enable(self, enabled: bool) -> None:
+        with self._lock:
+            self._wound_enable = bool(enabled)
+
+    def set_roll_diameter_m(self, roll_diameter_m: float) -> None:
+        with self._lock:
+            self._enc.set_roll_diameter_m(roll_diameter_m)
+
+    def set_speed_filter_n(self, window: int) -> None:
+        with self._lock:
+            self._enc.set_speed_filter_n(window)
+
+    def set_max_speed_mpm(self, max_speed_mpm: float) -> None:
+        with self._lock:
+            self._enc.set_max_speed_mpm(max_speed_mpm)
+
+    def set_invert(self, invert: bool) -> None:
+        with self._lock:
+            self._enc.set_invert(invert)
+
+    def reset_unwind(self) -> None:
+        with self._lock:
+            self._pending_reset_unwind = True
+
+    def reset_wound(self) -> None:
+        with self._lock:
+            self._pending_reset_wound = True
+
+    def _run(self) -> None:
+        last_t = monotonic()
+        next_t = last_t
+        while not self._stop.is_set():
+            now = monotonic()
+            dt = now - last_t
+            last_t = now
+            dt = min(max(dt, 1e-4), 0.5)
+
+            with self._lock:
+                if self._pending_reset_unwind:
+                    self._enc.reset_unwind()
+                    self._pending_reset_unwind = False
+                if self._pending_reset_wound:
+                    self._enc.reset_wound()
+                    self._pending_reset_wound = False
+                self._telem = self._enc.step(dt, wound_enable=self._wound_enable)
+
+            next_t += self._period_s
+            sleep_s = next_t - monotonic()
+            if sleep_s > 0.0:
+                if self._stop.wait(sleep_s):
+                    break
+            else:
+                # Cycle ran long (I2C stall) — resync schedule.
+                next_t = monotonic()

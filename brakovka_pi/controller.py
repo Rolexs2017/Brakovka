@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from .brake_pwm import BrakePwm
 from .commands import merge_command_dicts
 from .config import load_runtime_config, resolve_emulator
-from .encoder import Encoder
+from .encoder import Encoder, ThreadedEncoder
 from .emulation import EmulatedVfd, SimEncoder
 from .gpio_io import GpioInputs
 from .logutil import setup_logging
@@ -17,6 +17,7 @@ from .machine import Inputs, Machine
 from .modbus_rs485 import Rs485Vfd, VfdCommand
 from .opcua_srv import OpcUaBridge
 from .state import MachineState
+from .vfd_io import AsyncVfdBridge
 
 if TYPE_CHECKING:
     from brakovka_hmi.bridge import LocalBridge
@@ -92,6 +93,17 @@ async def run_controller(
         m.telem.modbus_error = True
         machine_log.error("Modbus: serial port not connected")
     await opc.start()
+
+    vfd_io = AsyncVfdBridge(
+        vfd,
+        cmd_period_s=timing_cfg.vfd_cmd_period_s,
+        poll_period_s=timing_cfg.vfd_status_poll_period_s,
+        min_delta_hz=timing_cfg.vfd_cmd_min_delta_hz,
+    )
+    await vfd_io.start()
+    if not emulator:
+        machine_log.info("VFD Modbus I/O in background task (PID not blocked)")
+
     log.info(
         "Controller started (emulator=%s, hmi=%s, gpio_buttons=%s, pin_factory=%s)",
         emulator,
@@ -114,6 +126,7 @@ async def run_controller(
     )
 
     enc_hw: Encoder | None = None
+    enc_thread: ThreadedEncoder | None = None
     enc_emu: SimEncoder | None = None
     if emulator:
         enc_emu = SimEncoder(
@@ -133,7 +146,13 @@ async def run_controller(
             max_speed_mpm=m.params.max_ramp_speed_mpm,
             invert=m.params.encoder_invert,
         )
-        encoder = enc_hw
+        enc_thread = ThreadedEncoder(enc_hw, period_s=timing_cfg.task_period_s)
+        enc_thread.start()
+        encoder = enc_thread
+        machine_log.info(
+            "Hardware encoder in dedicated thread (period=%.3f s)",
+            timing_cfg.task_period_s,
+        )
 
     try:
         last_freq_cmd = 0.0
@@ -151,8 +170,6 @@ async def run_controller(
         p_task = _Periodic(timing_cfg.task_period_s)
         p_opc_poll = _Periodic(timing_cfg.opcua_poll_period_s)
         p_opc_pub = _Periodic(timing_cfg.opcua_publish_period_s)
-        p_vfd_poll = _Periodic(timing_cfg.vfd_status_poll_period_s)
-        p_vfd_cmd = _Periodic(timing_cfg.vfd_cmd_period_s)
 
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -177,11 +194,11 @@ async def run_controller(
                     )
                 await opc.poll_commands_and_setpoints()
                 await opc.clear_one_shots()
-                if enc_hw is not None:
-                    enc_hw.set_roll_diameter_m(m.params.roll_diameter_m)
-                    enc_hw.set_speed_filter_n(m.params.encoder_speed_filter_n)
-                    enc_hw.set_max_speed_mpm(m.params.max_ramp_speed_mpm)
-                    enc_hw.set_invert(m.params.encoder_invert)
+                if enc_thread is not None:
+                    enc_thread.set_roll_diameter_m(m.params.roll_diameter_m)
+                    enc_thread.set_speed_filter_n(m.params.encoder_speed_filter_n)
+                    enc_thread.set_max_speed_mpm(m.params.max_ramp_speed_mpm)
+                    enc_thread.set_invert(m.params.encoder_invert)
                 if enc_emu is not None:
                     enc_emu.thickness_m = m.params.material_thickness_m
                     enc_emu.roll_diameter_m = max(0.001, float(m.params.roll_diameter_m))
@@ -200,8 +217,9 @@ async def run_controller(
 
             if p_task.due(now):
                 task_start = now
-                io_wait_s = 0.0
                 gap_s = task_start - last_task_ok_t
+                ctrl_dt = gap_s if gap_s > 1e-4 else timing_cfg.task_period_s
+                ctrl_dt = min(max(ctrl_dt, 1e-4), 0.5)
                 if gap_s > watchdog_limit_s:
                     if not m.telem.watchdog_fault:
                         machine_log.error(
@@ -239,14 +257,10 @@ async def run_controller(
                 state = m.telem.state
                 forward = state != MachineState.REVERSE
                 # Мерный ролик считает факт движения всегда (в т.ч. IDLE — калибровка).
-                # Иначе в «Ожидании» импульсы/метраж замирают при ручном провороте.
                 wound_enable = True
-                # Фактический dt: номинальный период даёт ложные «спайки» при лаге цикла.
-                enc_dt = gap_s if gap_s > 1e-4 else timing_cfg.task_period_s
-                enc_dt = min(max(enc_dt, 1e-4), 0.5)
                 if emulator:
                     e = encoder.step(
-                        enc_dt,
+                        ctrl_dt,
                         last_freq_cmd,
                         forward=forward,
                         wound_enable=wound_enable,
@@ -261,10 +275,9 @@ async def run_controller(
                     m.telem.encoder_error = not bool(e["ok"])
                     m.telem.magnet_ok = True
                 else:
-                    e = encoder.step(
-                        enc_dt,
-                        wound_enable=wound_enable,
-                    )
+                    assert enc_thread is not None
+                    enc_thread.set_wound_enable(wound_enable)
+                    e = enc_thread.snapshot()
                     m.telem.speed_mpm = float(e.speed_mpm)
                     m.telem.wound_length_m = float(e.wound_m)
                     m.telem.unwind_length_m = float(e.unwind_m)
@@ -295,40 +308,20 @@ async def run_controller(
                     machine_log.info("Encoder recovered")
                 prev_encoder_error = m.telem.encoder_error
 
-                sp_mpm = m.update_speed_ramp(timing_cfg.task_period_s)
+                # Ramp + PID with real dt — not blocked by Modbus.
+                sp_mpm = m.update_speed_ramp(ctrl_dt)
                 actual_mpm = m.telem.speed_mpm
                 stopping = state == MachineState.STOPPING
-                freq_cmd_hz = m.pid_speed_to_hz(
-                    sp_mpm, actual_mpm, timing_cfg.task_period_s
+                freq_cmd_hz = m.pid_speed_to_hz(sp_mpm, actual_mpm, ctrl_dt)
+                last_freq_cmd = freq_cmd_hz
+                m.telem.vfd_freq_cmd_hz = freq_cmd_hz
+
+                vfd_cmd = VfdCommand(
+                    run=(not stopping) and sp_mpm > 0.01 and inp.estop_ok,
+                    reverse=(state == MachineState.REVERSE),
+                    speed_setpoint_hz=freq_cmd_hz,
                 )
-
-                should_send = (
-                    emulator
-                    or stopping
-                    or p_vfd_cmd.due(now)
-                    or abs(freq_cmd_hz - last_freq_cmd) >= timing_cfg.vfd_cmd_min_delta_hz
-                )
-
-                if should_send:
-                    p_vfd_cmd.arm_next(now)
-                    last_freq_cmd = freq_cmd_hz
-
-                    vfd_cmd = VfdCommand(
-                        run=(not stopping) and sp_mpm > 0.01 and inp.estop_ok,
-                        reverse=(state == MachineState.REVERSE),
-                        speed_setpoint_hz=freq_cmd_hz,
-                    )
-                    t_io = monotonic()
-                    write_ok = await vfd.write_command(vfd_cmd)
-                    io_wait_s += monotonic() - t_io
-                    m.telem.vfd_freq_cmd_hz = freq_cmd_hz
-                    if not emulator and write_ok is False:
-                        if not m.telem.modbus_error:
-                            machine_log.error("Modbus write failed")
-                        m.telem.modbus_error = True
-                        if m.fault_stop("Modbus write"):
-                            machine_log.error("Fault stop: Modbus write failed")
-                        await vfd.reconnect()
+                vfd_io.set_command(vfd_cmd, force=stopping or entered_stopping)
 
                 unwind_diameter_m = m.unwind_diameter_m()
                 m.telem.unwind_diameter_mm = unwind_diameter_m * 1000.0
@@ -344,44 +337,32 @@ async def run_controller(
                 m.telem.brake_pressure_pct = brake_pct
                 last_brake_pct = brake_pct
 
-                # Exclude Modbus I/O from compute time — timeouts are modbus_error, not watchdog.
-                task_elapsed = monotonic() - task_start - io_wait_s
-                if task_elapsed > watchdog_limit_s:
-                    if not m.telem.watchdog_fault:
-                        machine_log.error(
-                            "Watchdog fault: task compute=%.3f s (limit=%.3f s)",
-                            task_elapsed,
-                            watchdog_limit_s,
-                        )
-                    m.telem.watchdog_fault = True
-                    if m.telem.state not in (MachineState.IDLE, MachineState.STOPPING):
-                        m._enter_stopping()
-                    t_io = monotonic()
-                    write_ok = await vfd.write_command(
-                        VfdCommand(run=False, reverse=False, speed_setpoint_hz=0.0)
-                    )
-                    io_wait_s += monotonic() - t_io
-                    m.telem.vfd_freq_cmd_hz = 0.0
-                    if not emulator and write_ok is False:
+                # Apply latest VFD status from background I/O (no await).
+                io = vfd_io.snapshot()
+                m.telem.vfd_status_word = io.status_word
+                m.telem.vfd_error_code = io.error_code
+                m.telem.vfd_freq_out_hz = io.freq_out_hz
+                m.telem.vfd_fault = io.fault
+                m.telem.vfd_warning = io.warning
+
+                if not emulator:
+                    if not io.write_ok or not io.read_ok:
+                        if not m.telem.modbus_error:
+                            if not io.write_ok:
+                                machine_log.error("Modbus write failed")
+                            if not io.read_ok:
+                                machine_log.error("Modbus communication error (no response)")
+                        was_modbus = m.telem.modbus_error
                         m.telem.modbus_error = True
-                elif gap_s <= watchdog_limit_s and m.telem.watchdog_fault:
-                    machine_log.info("Watchdog cleared")
-                    m.telem.watchdog_fault = False
-
-                last_task_ok_t = monotonic()
-
-            if p_vfd_poll.due(now):
-                p_vfd_poll.arm_next(now)
-                st = await vfd.read_status()
-                if st:
-                    m.telem.vfd_status_word = int(st.get("status_word", 0))
-                    m.telem.vfd_error_code = int(st.get("error_code", 0))
-                    m.telem.vfd_freq_out_hz = float(st.get("freq_out_hz", 0.0))
-                    m.telem.vfd_fault = bool(st.get("fault", False))
-                    m.telem.vfd_warning = bool(st.get("warning", False))
-                    if not emulator and m.telem.modbus_error:
-                        machine_log.info("Modbus link restored")
-                    if not emulator:
+                        if not was_modbus and m.fault_stop("Modbus lost"):
+                            machine_log.error("Fault stop: Modbus communication error")
+                            vfd_io.set_command(
+                                VfdCommand(run=False, reverse=False, speed_setpoint_hz=0.0),
+                                force=True,
+                            )
+                    else:
+                        if m.telem.modbus_error:
+                            machine_log.info("Modbus link restored")
                         m.telem.modbus_error = False
 
                     if m.telem.vfd_fault and not prev_vfd_fault:
@@ -392,6 +373,10 @@ async def run_controller(
                         )
                         if m.fault_stop("VFD fault"):
                             machine_log.error("Fault stop: VFD fault")
+                            vfd_io.set_command(
+                                VfdCommand(run=False, reverse=False, speed_setpoint_hz=0.0),
+                                force=True,
+                            )
                     elif not m.telem.vfd_fault and prev_vfd_fault:
                         machine_log.info("VFD fault cleared")
                     prev_vfd_fault = m.telem.vfd_fault
@@ -402,17 +387,32 @@ async def run_controller(
                             m.telem.vfd_status_word,
                         )
                     prev_vfd_warning = m.telem.vfd_warning
-                elif not emulator:
-                    if not m.telem.modbus_error:
-                        machine_log.error("Modbus communication error (no response)")
-                    m.telem.modbus_error = True
-                    if not prev_modbus_error and m.fault_stop("Modbus lost"):
-                        machine_log.error("Fault stop: Modbus communication error")
 
-                if not emulator:
                     if not m.telem.modbus_error and prev_modbus_error:
                         machine_log.info("Modbus error cleared")
                     prev_modbus_error = m.telem.modbus_error
+
+                task_elapsed = monotonic() - task_start
+                if task_elapsed > watchdog_limit_s:
+                    if not m.telem.watchdog_fault:
+                        machine_log.error(
+                            "Watchdog fault: task compute=%.3f s (limit=%.3f s)",
+                            task_elapsed,
+                            watchdog_limit_s,
+                        )
+                    m.telem.watchdog_fault = True
+                    if m.telem.state not in (MachineState.IDLE, MachineState.STOPPING):
+                        m._enter_stopping()
+                    vfd_io.set_command(
+                        VfdCommand(run=False, reverse=False, speed_setpoint_hz=0.0),
+                        force=True,
+                    )
+                    m.telem.vfd_freq_cmd_hz = 0.0
+                elif gap_s <= watchdog_limit_s and m.telem.watchdog_fault:
+                    machine_log.info("Watchdog cleared")
+                    m.telem.watchdog_fault = False
+
+                last_task_ok_t = monotonic()
 
             if p_opc_pub.due(now):
                 p_opc_pub.arm_next(now)
@@ -430,12 +430,15 @@ async def run_controller(
         except Exception:
             machine_log.exception("Brake shutdown failed")
         try:
-            await vfd.write_command(
-                VfdCommand(run=False, reverse=False, speed_setpoint_hz=0.0)
-            )
+            await vfd_io.stop()
         except Exception:
-            machine_log.exception("VFD stop command failed")
-        if enc_hw is not None:
+            machine_log.exception("VFD I/O stop failed")
+        if enc_thread is not None:
+            try:
+                enc_thread.close()
+            except Exception:
+                machine_log.exception("Encoder thread shutdown failed")
+        elif enc_hw is not None:
             try:
                 enc_hw.close()
             except Exception:
