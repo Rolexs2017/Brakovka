@@ -255,6 +255,28 @@ def build_stylesheet() -> str:
     QPushButton#primary:hover {{
         background-color: rgba(0, 212, 255, 0.28);
     }}
+    QPushButton#settingsGroup {{
+        text-align: center;
+        padding: 16px 12px;
+        border: 1px solid {t.BORDER};
+        border-radius: 10px;
+        background-color: {t.PANEL};
+        color: {t.TEXT};
+        font-size: 12pt;
+        font-weight: 600;
+    }}
+    QPushButton#settingsGroup:hover {{
+        border-color: {t.ACCENT};
+        color: {t.ACCENT};
+    }}
+    QPushButton#settingsGroup:pressed {{
+        background-color: rgba(255, 107, 53, 0.2);
+    }}
+    QWidget#trendPlot {{
+        background-color: {t.PANEL};
+        border: 1px solid {t.BORDER};
+        border-radius: 10px;
+    }}
     QProgressBar {{
         border: 1px solid {t.BORDER};
         border-radius: 6px;

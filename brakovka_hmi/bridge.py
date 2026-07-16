@@ -143,6 +143,10 @@ class LocalBridge:
                 self._opc_sync_pending = True
             return True
 
+    def mark_opc_sync_pending(self) -> None:
+        with self._lock:
+            self._opc_sync_pending = True
+
     def take_opc_sync_pending(self) -> bool:
         """Consume flag: HMI changed Machine params and OPC nodes need refresh."""
         with self._lock:
@@ -192,6 +196,22 @@ class LocalBridge:
             except Exception:
                 log.exception("Failed to persist encoder_invert")
                 return False
+            return True
+
+    def start_pid_autotune(self) -> bool:
+        """Start relay PID autotune (IDLE only)."""
+        with self._lock:
+            m = self._machine
+            if m is None or not self._running:
+                return False
+            return bool(m.start_autotune())
+
+    def abort_pid_autotune(self) -> bool:
+        with self._lock:
+            m = self._machine
+            if m is None or not self._running:
+                return False
+            m.abort_autotune("Прервано с панели")
             return True
 
     def calibrate_roll_diameter(self, true_length_m: float) -> dict[str, float] | None:
@@ -265,6 +285,8 @@ class LocalBridge:
                 status |= int(StatusFlag.MODBUS_ERROR)
 
             motor_rpm = float(t.vfd_freq_cmd_hz) * float(p.emu_motor_rpm_per_hz)
+            # PID out_max in machine is 320 Hz → 100%
+            pid_out_pct = max(0.0, min(100.0, 100.0 * float(t.vfd_freq_cmd_hz) / 320.0))
             g = self._gpio_levels
             return MachineSnapshot(
                 connected=True,
@@ -279,6 +301,7 @@ class LocalBridge:
                 progress_pct=float(t.wound_progress_pct),
                 tension_n=float(t.tension_n),
                 vfd_freq_out_hz=float(t.vfd_freq_out_hz),
+                pid_out_pct=pid_out_pct,
                 encoder_pulses=int(t.encoder_pulses),
                 target_length_m=float(p.target_length_m),
                 gpio_available=bool(g.available),
@@ -294,4 +317,7 @@ class LocalBridge:
                 gpio_pin_reset_wound=int(g.pin_reset_wound),
                 gpio_error=str(g.error or ""),
                 gpio_pin_factory=str(g.pin_factory or ""),
+                autotune_active=bool(t.autotune_active),
+                autotune_status=str(t.autotune_status or "idle"),
+                autotune_message=str(t.autotune_message or ""),
             )

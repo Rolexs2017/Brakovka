@@ -16,6 +16,9 @@ from .logutil import setup_logging
 from .machine import Inputs, Machine
 from .modbus_rs485 import Rs485Vfd, VfdCommand
 from .opcua_srv import OpcUaBridge
+from .pid_autotune import AutotunePhase, PidAutotuner
+from .setpoints import SETPOINTS, machine_params_to_json
+from .settings import save_machine_section
 from .state import MachineState
 from .vfd_io import AsyncVfdBridge
 
@@ -166,6 +169,7 @@ async def run_controller(
         prev_modbus_error = False
         last_task_ok_t = monotonic()
         watchdog_limit_s = float(timing_cfg.watchdog_limit_s)
+        autotuner: PidAutotuner | None = None
 
         p_task = _Periodic(timing_cfg.task_period_s)
         p_opc_poll = _Periodic(timing_cfg.opcua_poll_period_s)
@@ -308,17 +312,83 @@ async def run_controller(
                     machine_log.info("Encoder recovered")
                 prev_encoder_error = m.telem.encoder_error
 
-                # Ramp + PID with real dt — not blocked by Modbus.
-                sp_mpm = m.update_speed_ramp(ctrl_dt)
                 actual_mpm = m.telem.speed_mpm
                 stopping = state == MachineState.STOPPING
-                freq_cmd_hz = m.pid_speed_to_hz(sp_mpm, actual_mpm, ctrl_dt)
+
+                # --- PID autotune (relay) or normal ramp+PID ---
+                if m.telem.autotune_active:
+                    if autotuner is None:
+                        bias_scale = 1.0 / max(float(m.params.emu_mpm_per_hz), 0.1)
+                        autotuner = PidAutotuner(
+                            setpoint_mpm=float(m.params.jog_speed_mpm),
+                            relay_amp_hz=8.0,
+                            hysteresis_mpm=0.3,
+                            min_cycles=3,
+                            timeout_s=45.0,
+                            ramp_s=3.0,
+                            bias_hz_per_mpm=bias_scale,
+                            kp_lo=SETPOINTS["pid_kp"].lo,
+                            kp_hi=SETPOINTS["pid_kp"].hi,
+                            ti_lo=SETPOINTS["pid_ti"].lo,
+                            ti_hi=SETPOINTS["pid_ti"].hi,
+                            kd_lo=SETPOINTS["pid_kd"].lo,
+                            kd_hi=SETPOINTS["pid_kd"].hi,
+                        )
+                        autotuner.start()
+                        machine_log.info(
+                            "PID autotune started: setpoint=%.1f mpm amp=%.1f Hz",
+                            m.params.jog_speed_mpm,
+                            8.0,
+                        )
+                    tune = autotuner.step(actual_mpm, ctrl_dt)
+                    m.telem.autotune_message = tune.message
+                    freq_cmd_hz = float(tune.freq_hz)
+                    run_cmd = bool(tune.run) and inp.estop_ok and not stopping
+                    if tune.finished:
+                        if tune.phase == AutotunePhase.DONE and tune.result is not None:
+                            r = tune.result
+                            m.apply_setpoint("pid_kp", r.kp)
+                            m.apply_setpoint("pid_ti", r.ti)
+                            m.apply_setpoint("pid_kd", r.kd)
+                            try:
+                                save_machine_section(machine_params_to_json(m.params))
+                            except Exception:
+                                machine_log.exception("Failed to persist autotuned PID")
+                            m.finish_autotune_ok(tune.message)
+                            machine_log.info(
+                                "PID autotune OK: kp=%.3f ti=%.3f kd=%.3f ku=%.3f pu=%.3f",
+                                r.kp,
+                                r.ti,
+                                r.kd,
+                                r.ku,
+                                r.pu_s,
+                            )
+                            if hmi_bridge is not None:
+                                hmi_bridge.mark_opc_sync_pending()
+                        elif tune.phase == AutotunePhase.ABORTED:
+                            if m.telem.autotune_active:
+                                m.abort_autotune(tune.message)
+                            machine_log.warning("PID autotune aborted: %s", tune.message)
+                        else:
+                            m.finish_autotune_fail(tune.message or "Ошибка автонастройки")
+                            machine_log.error("PID autotune failed: %s", tune.message)
+                        autotuner = None
+                        freq_cmd_hz = 0.0
+                        run_cmd = False
+                    sp_mpm = float(m.params.jog_speed_mpm) if run_cmd else 0.0
+                else:
+                    if autotuner is not None:
+                        autotuner = None
+                    sp_mpm = m.update_speed_ramp(ctrl_dt)
+                    freq_cmd_hz = m.pid_speed_to_hz(sp_mpm, actual_mpm, ctrl_dt)
+                    run_cmd = (not stopping) and sp_mpm > 0.01 and inp.estop_ok
+
                 last_freq_cmd = freq_cmd_hz
                 m.telem.vfd_freq_cmd_hz = freq_cmd_hz
 
                 vfd_cmd = VfdCommand(
-                    run=(not stopping) and sp_mpm > 0.01 and inp.estop_ok,
-                    reverse=(state == MachineState.REVERSE),
+                    run=run_cmd,
+                    reverse=(state == MachineState.REVERSE) and not m.telem.autotune_active,
                     speed_setpoint_hz=freq_cmd_hz,
                 )
                 vfd_io.set_command(vfd_cmd, force=stopping or entered_stopping)
@@ -327,7 +397,9 @@ async def run_controller(
                 m.telem.unwind_diameter_mm = unwind_diameter_m * 1000.0
                 m.telem.tension_n = m.calc_tension_n(last_brake_pct)
 
-                if m.tension_control_enabled():
+                if m.telem.autotune_active:
+                    tension_brake_pct = 0.0
+                elif m.tension_control_enabled():
                     tension_brake_pct = m.tension_brake_command_pct()
                 else:
                     tension_brake_pct = 0.0

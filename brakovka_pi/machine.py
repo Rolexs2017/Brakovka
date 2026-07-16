@@ -87,6 +87,9 @@ class Telemetry:
     ramp_speed_mpm: float = 0.0
     wound_progress_pct: float = 0.0
     state: MachineState = MachineState.IDLE
+    autotune_active: bool = False
+    autotune_status: str = "idle"  # idle|running|ok|fail|aborted
+    autotune_message: str = ""
 
 
 @dataclass
@@ -102,7 +105,7 @@ class Machine:
         return self.telem.state in MOVING_STATES
 
     def allow_roll_edit(self) -> bool:
-        return self.telem.state == MachineState.IDLE
+        return self.telem.state == MachineState.IDLE and not self.telem.autotune_active
 
     def wound_progress_pct(self) -> float:
         target = self.params.target_length_m
@@ -130,16 +133,70 @@ class Machine:
 
     def fault_stop(self, reason: str = "") -> bool:
         """Stop motion on fault. Returns True if STOPPING was entered."""
+        if self.telem.autotune_active:
+            self.abort_autotune(reason or "Авария")
         if self.telem.state in (MachineState.IDLE, MachineState.STOPPING):
             return False
         self._enter_stopping()
         _ = reason
         return True
 
+    def start_autotune(self) -> bool:
+        """Request PID autotune test run. Only from IDLE without faults."""
+        if self.telem.state != MachineState.IDLE:
+            return False
+        if self.telem.autotune_active:
+            return False
+        if self.telem.vfd_fault or self.telem.modbus_error or self.telem.encoder_error:
+            return False
+        if self.telem.watchdog_fault:
+            return False
+        self.telem.autotune_active = True
+        self.telem.autotune_status = "running"
+        self.telem.autotune_message = "Запуск…"
+        # Hold RUN-like motion while autotune drives VFD (no START pulse needed).
+        self.telem.state = MachineState.RUN
+        self._ramp_speed_mpm = 0.0
+        self.telem.ramp_speed_mpm = 0.0
+        self.reset_pid()
+        return True
+
+    def abort_autotune(self, reason: str = "Прервано") -> None:
+        if not self.telem.autotune_active and self.telem.autotune_status != "running":
+            return
+        self.telem.autotune_active = False
+        self.telem.autotune_status = "aborted"
+        self.telem.autotune_message = reason
+        if self.telem.state not in (MachineState.IDLE, MachineState.STOPPING):
+            self._enter_stopping()
+
+    def finish_autotune_ok(self, message: str) -> None:
+        self.telem.autotune_active = False
+        self.telem.autotune_status = "ok"
+        self.telem.autotune_message = message
+        if self.telem.state not in (MachineState.IDLE, MachineState.STOPPING):
+            self._enter_stopping()
+
+    def finish_autotune_fail(self, message: str) -> None:
+        self.telem.autotune_active = False
+        self.telem.autotune_status = "fail"
+        self.telem.autotune_message = message
+        if self.telem.state not in (MachineState.IDLE, MachineState.STOPPING):
+            self._enter_stopping()
+
     def update_state(self, inp: Inputs) -> None:
         self.telem.wound_progress_pct = self.wound_progress_pct()
         st = self.telem.state
         fault_block = self.telem.vfd_fault or self.telem.modbus_error
+
+        if self.telem.autotune_active:
+            # Only STOP / estop / fault end the test; ignore START/JOG/REVERSE.
+            if inp.stop_pulse or (not inp.estop_ok) or fault_block:
+                self.abort_autotune(
+                    "СТОП" if inp.stop_pulse else ("E-STOP" if not inp.estop_ok else "Авария")
+                )
+            return
+
         if st == MachineState.IDLE:
             if (
                 inp.start_pulse

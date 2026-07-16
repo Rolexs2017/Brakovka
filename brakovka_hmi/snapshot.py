@@ -66,6 +66,7 @@ class MachineSnapshot:
     progress_pct: float = 0.0
     tension_n: float = 0.0
     vfd_freq_out_hz: float = 0.0
+    pid_out_pct: float = 0.0
     encoder_pulses: int = 0
     # Shown on main screen; also available via settings poll.
     target_length_m: float = 0.0
@@ -83,6 +84,9 @@ class MachineSnapshot:
     gpio_pin_reset_wound: int = 7
     gpio_error: str = ""
     gpio_pin_factory: str = ""
+    autotune_active: bool = False
+    autotune_status: str = "idle"
+    autotune_message: str = ""
 
     @property
     def state_name(self) -> str:

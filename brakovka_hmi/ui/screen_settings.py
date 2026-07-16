@@ -3,22 +3,46 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from brakovka_hmi.bridge import LocalBridge
-from brakovka_hmi.snapshot import MOVING_STATES, MachineSnapshot
+from brakovka_hmi.snapshot import MOVING_STATES, MachineSnapshot, MachineState
 from brakovka_hmi.sounds import play_error, play_ok
 from brakovka_hmi.ui.form_guard import EditableFormMixin
+from brakovka_hmi.ui.trend_plot import DualTrendPlot
 from brakovka_hmi.ui.virtual_keyboard import TouchDoubleSpinBox, TouchSpinBox
+
+_FIELD_W = 140
+
+PAGE_HUB = 0
+PAGE_SPEED = 1
+PAGE_PID = 2
+PAGE_ROLL = 3
+PAGE_SERVICE = 4
+PAGE_PID_TREND = 5
+
+
+def _form() -> QFormLayout:
+    f = QFormLayout()
+    f.setVerticalSpacing(6)
+    f.setHorizontalSpacing(12)
+    f.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+    return f
+
+
+def _fix_field(w) -> None:
+    w.setFixedWidth(_FIELD_W)
 
 
 class SettingsScreen(EditableFormMixin, QWidget):
@@ -32,34 +56,74 @@ class SettingsScreen(EditableFormMixin, QWidget):
 
         root = QVBoxLayout(self)
         root.setSpacing(8)
+
         title_row = QHBoxLayout()
-        title = QLabel("Настройки")
-        title.setObjectName("screenTitle")
-        title_row.addWidget(title)
+        self._title = QLabel("Настройки")
+        self._title.setObjectName("screenTitle")
+        title_row.addWidget(self._title)
         title_row.addStretch()
         self._dirty_label = QLabel("")
         self._dirty_label.setStyleSheet("color: #ffb020; font-size: 11pt; font-weight: 600;")
         title_row.addWidget(self._dirty_label)
         root.addLayout(title_row)
 
-        params_row = QHBoxLayout()
-        params_row.setSpacing(16)
+        self._stack = QStackedWidget()
+        root.addWidget(self._stack, stretch=1)
 
-        left_form = QFormLayout()
-        left_form.setVerticalSpacing(4)
-        left_form.setHorizontalSpacing(10)
-        left_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        self._build_fields()
+        self._stack.addWidget(self._build_hub_page())
+        self._stack.addWidget(self._build_speed_page())
+        self._stack.addWidget(self._build_pid_page())
+        self._stack.addWidget(self._build_roll_page())
+        self._stack.addWidget(self._build_service_page())
+        self._stack.addWidget(self._build_pid_trend_page())
+
+        footer = QHBoxLayout()
+        self._btn_back = QPushButton("← К группам")
+        self._btn_back.setObjectName("cmd")
+        self._btn_back.setMinimumHeight(40)
+        self._btn_save = QPushButton("Сохранить уставки")
+        self._btn_save.setObjectName("primary")
+        self._btn_save.setMinimumHeight(40)
+        footer.addWidget(self._btn_back)
+        footer.addStretch()
+        footer.addWidget(self._btn_save)
+        root.addLayout(footer)
+
+        self._btn_save.clicked.connect(self._save)
+        self._btn_emu.clicked.connect(self._toggle_emulator)
+        self._btn_invert.clicked.connect(self._toggle_encoder_invert)
+        self._btn_calibrate.clicked.connect(self._calibrate_roll)
+        self._btn_autotune.clicked.connect(self._start_autotune)
+        self._btn_abort_tune.clicked.connect(self._abort_autotune)
+        self._btn_quit.clicked.connect(self.quit_requested.emit)
+
+        self._last_pulses = 0
+        self._encoder_invert = False
+        self._prev_autotune_status = ""
+        self._form_widgets_list = (
+            self._speed,
+            self._tension,
+            self._jog,
+            self._reverse,
+            self._slowdown,
+            self._accel,
+            self._decel,
+            self._brake_delay,
+            self._kp,
+            self._ti,
+            self._kd,
+            self._roll_dia,
         )
-        right_form = QFormLayout()
-        right_form.setVerticalSpacing(4)
-        right_form.setHorizontalSpacing(10)
-        right_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        self._init_form_guard(
+            list(self._form_widgets_list),
+            dirty_changed=self._on_dirty_changed,
         )
+        self._show_page(PAGE_HUB)
+        self._refresh_emulator_ui()
+        self._refresh_invert_ui()
 
-        field_w = 140
-
+    def _build_fields(self) -> None:
         self._speed = TouchDoubleSpinBox(keypad_title="Рабочая скорость")
         self._speed.setRange(0.0, 500.0)
         self._speed.setDecimals(1)
@@ -115,6 +179,12 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._roll_dia.setRange(20, 1000)
         self._roll_dia.setSuffix(" мм")
 
+        self._cal_length = TouchDoubleSpinBox(keypad_title="Фактическая длина")
+        self._cal_length.setRange(0.01, 10000.0)
+        self._cal_length.setDecimals(2)
+        self._cal_length.setSuffix(" м")
+        self._cal_length.setValue(10.0)
+
         for w in (
             self._speed,
             self._tension,
@@ -128,43 +198,148 @@ class SettingsScreen(EditableFormMixin, QWidget):
             self._ti,
             self._kd,
             self._roll_dia,
+            self._cal_length,
         ):
-            w.setFixedWidth(field_w)
+            _fix_field(w)
 
-        left_form.addRow("Рабочая скорость", self._speed)
-        left_form.addRow("Натяжение", self._tension)
-        left_form.addRow("Скорость JOG", self._jog)
-        left_form.addRow("Скорость реверса", self._reverse)
-        left_form.addRow("Скорость замедления", self._slowdown)
-        left_form.addRow("Время разгона", self._accel)
+    def _group_button(self, text: str, subtitle: str, page: int) -> QPushButton:
+        btn = QPushButton(f"{text}\n{subtitle}")
+        btn.setObjectName("settingsGroup")
+        btn.setMinimumHeight(88)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(lambda _=False, p=page: self._show_page(p))
+        return btn
 
-        right_form.addRow("Время торможения", self._decel)
-        right_form.addRow("Выдержка тормоза", self._brake_delay)
-        right_form.addRow("PID Kp", self._kp)
-        right_form.addRow("PID Ti", self._ti)
-        right_form.addRow("PID Kd", self._kd)
-        right_form.addRow("Диаметр мерн. ролика", self._roll_dia)
+    def _build_hub_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(12)
+        hint = QLabel("Выберите группу параметров")
+        hint.setStyleSheet("color: #8aa4b8; font-size: 10pt;")
+        lay.addWidget(hint)
 
-        params_row.addLayout(left_form, stretch=1)
-        params_row.addLayout(right_form, stretch=1)
-        root.addLayout(params_row)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
+        grid.addWidget(
+            self._group_button("Скорость", "JOG, реверс, разгон, натяжение", PAGE_SPEED),
+            0,
+            0,
+        )
+        grid.addWidget(
+            self._group_button("PID", "Kp / Ti / Kd, автонастройка", PAGE_PID),
+            0,
+            1,
+        )
+        grid.addWidget(
+            self._group_button("Ролик", "Диаметр, калибровка, инверт", PAGE_ROLL),
+            1,
+            0,
+        )
+        grid.addWidget(
+            self._group_button("Сервис", "Эмуляция, выход", PAGE_SERVICE),
+            1,
+            1,
+        )
+        lay.addLayout(grid)
+        lay.addStretch()
+        return page
 
-        cal_box = QVBoxLayout()
-        cal_box.setSpacing(4)
-        cal_title = QLabel("Калибровка мерного ролика")
-        cal_title.setStyleSheet("color: #8aa4b8; margin-top: 2px;")
-        cal_box.addWidget(cal_title)
+    def _build_speed_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(8)
+        cols = QHBoxLayout()
+        left = _form()
+        right = _form()
+        left.addRow("Рабочая скорость", self._speed)
+        left.addRow("Натяжение", self._tension)
+        left.addRow("Скорость JOG", self._jog)
+        left.addRow("Скорость реверса", self._reverse)
+        right.addRow("Скорость замедления", self._slowdown)
+        right.addRow("Время разгона", self._accel)
+        right.addRow("Время торможения", self._decel)
+        right.addRow("Выдержка тормоза", self._brake_delay)
+        cols.addLayout(left, stretch=1)
+        cols.addLayout(right, stretch=1)
+        lay.addLayout(cols)
+        lay.addStretch()
+        return page
+
+    def _build_pid_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(10)
+        form = _form()
+        form.addRow("PID Kp", self._kp)
+        form.addRow("PID Ti", self._ti)
+        form.addRow("PID Kd", self._kd)
+        lay.addLayout(form)
+
+        tune_row = QHBoxLayout()
+        tune_row.setSpacing(10)
+        self._btn_autotune = QPushButton("Автонастройка PID")
+        self._btn_autotune.setObjectName("cmd")
+        self._btn_autotune.setMinimumWidth(200)
+        self._btn_abort_tune = QPushButton("Стоп автонастройки")
+        self._btn_abort_tune.setObjectName("cmdStop")
+        self._btn_abort_tune.setEnabled(False)
+        self._btn_pid_trend = QPushButton("График")
+        self._btn_pid_trend.setObjectName("cmd")
+        self._btn_pid_trend.setMinimumWidth(120)
+        self._btn_pid_trend.clicked.connect(lambda: self._show_page(PAGE_PID_TREND))
+        tune_row.addWidget(self._btn_autotune)
+        tune_row.addWidget(self._btn_abort_tune)
+        tune_row.addWidget(self._btn_pid_trend)
+        tune_row.addStretch()
+        lay.addLayout(tune_row)
+
+        self._autotune_status = QLabel(
+            "Автонастройка PID: тест на скорости JOG (только в Ожидании)."
+        )
+        self._autotune_status.setWordWrap(True)
+        self._autotune_status.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        lay.addWidget(self._autotune_status)
+        lay.addStretch()
+        return page
+
+    def _build_pid_trend_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(8)
+        hint = QLabel(
+            "Тренд ~60 с: скорость (м/мин, бирюзовый) и выход PID (% от 320 Гц, оранжевый)."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        lay.addWidget(hint)
+        self._pid_trend = DualTrendPlot(window_s=60.0)
+        lay.addWidget(self._pid_trend, stretch=1)
+        clear_row = QHBoxLayout()
+        self._btn_clear_trend = QPushButton("Очистить график")
+        self._btn_clear_trend.setObjectName("cmd")
+        self._btn_clear_trend.clicked.connect(self._pid_trend.clear)
+        clear_row.addWidget(self._btn_clear_trend)
+        clear_row.addStretch()
+        lay.addLayout(clear_row)
+        return page
+
+    def _build_roll_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(10)
+        form = _form()
+        form.addRow("Диаметр мерн. ролика", self._roll_dia)
+        lay.addLayout(form)
+
+        cal_title = QLabel("Калибровка")
+        cal_title.setStyleSheet("color: #8aa4b8;")
+        lay.addWidget(cal_title)
 
         cal_row = QHBoxLayout()
         cal_row.setSpacing(10)
         self._cal_pulses = QLabel("Импульсы: —")
         self._cal_pulses.setStyleSheet("color: #e8f1f8; font-size: 11pt;")
-        self._cal_length = TouchDoubleSpinBox(keypad_title="Фактическая длина")
-        self._cal_length.setRange(0.01, 10000.0)
-        self._cal_length.setDecimals(2)
-        self._cal_length.setSuffix(" м")
-        self._cal_length.setValue(10.0)
-        self._cal_length.setFixedWidth(field_w)
         self._btn_calibrate = QPushButton("Калибровать ролик")
         self._btn_calibrate.setObjectName("cmd")
         cal_row.addWidget(self._cal_pulses)
@@ -172,23 +347,26 @@ class SettingsScreen(EditableFormMixin, QWidget):
         cal_row.addWidget(self._cal_length)
         cal_row.addWidget(self._btn_calibrate)
         cal_row.addStretch()
-        cal_box.addLayout(cal_row)
-        root.addLayout(cal_box)
+        lay.addLayout(cal_row)
 
         invert_row = QHBoxLayout()
         invert_row.setSpacing(12)
         self._btn_invert = QPushButton()
         self._btn_invert.setObjectName("cmd")
-        self._btn_invert.setMinimumWidth(280)
-        self._invert_hint = QLabel(
-            "Меняет знак направления мерного ролика (намотка / размотка). "
-            "Применяется сразу."
-        )
+        self._btn_invert.setMinimumWidth(260)
+        self._invert_hint = QLabel("Знак направления мерного ролика. Применяется сразу.")
         self._invert_hint.setWordWrap(True)
         self._invert_hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
         invert_row.addWidget(self._btn_invert)
         invert_row.addWidget(self._invert_hint, stretch=1)
-        root.addLayout(invert_row)
+        lay.addLayout(invert_row)
+        lay.addStretch()
+        return page
+
+    def _build_service_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(12)
 
         emu_row = QHBoxLayout()
         emu_row.setSpacing(12)
@@ -200,59 +378,128 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._emu_hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
         emu_row.addWidget(self._btn_emu)
         emu_row.addWidget(self._emu_hint, stretch=1)
-        root.addLayout(emu_row)
+        lay.addLayout(emu_row)
 
-        btn_row = QHBoxLayout()
-        self._btn_save = QPushButton("Сохранить уставки")
-        self._btn_save.setObjectName("primary")
         self._btn_quit = QPushButton("Закрыть приложение")
         self._btn_quit.setObjectName("cmdStop")
-        btn_row.addWidget(self._btn_save)
-        btn_row.addStretch()
-        btn_row.addWidget(self._btn_quit)
-        root.addLayout(btn_row)
+        self._btn_quit.setMinimumHeight(44)
+        lay.addWidget(self._btn_quit, alignment=Qt.AlignmentFlag.AlignLeft)
+        lay.addStretch()
+        return page
 
-        self._btn_save.clicked.connect(self._save)
-        self._btn_quit.clicked.connect(self.quit_requested.emit)
-        self._btn_emu.clicked.connect(self._toggle_emulator)
-        self._btn_invert.clicked.connect(self._toggle_encoder_invert)
-        self._btn_calibrate.clicked.connect(self._calibrate_roll)
-
-        self._last_pulses = 0
-        self._encoder_invert = False
-        self._form_widgets_list = (
-            self._speed,
-            self._tension,
-            self._jog,
-            self._reverse,
-            self._slowdown,
-            self._accel,
-            self._decel,
-            self._brake_delay,
-            self._kp,
-            self._ti,
-            self._kd,
-            self._roll_dia,
+    def _show_page(self, index: int) -> None:
+        self._stack.setCurrentIndex(index)
+        titles = {
+            PAGE_HUB: "Настройки",
+            PAGE_SPEED: "Настройки · Скорость",
+            PAGE_PID: "Настройки · PID",
+            PAGE_ROLL: "Настройки · Ролик",
+            PAGE_SERVICE: "Настройки · Сервис",
+            PAGE_PID_TREND: "Настройки · PID · График",
+        }
+        self._title.setText(titles.get(index, "Настройки"))
+        # From trend go back to PID group, not hub.
+        if index == PAGE_PID_TREND:
+            self._btn_back.setText("← К PID")
+            try:
+                self._btn_back.clicked.disconnect()
+            except Exception:
+                pass
+            self._btn_back.clicked.connect(lambda: self._show_page(PAGE_PID))
+        else:
+            self._btn_back.setText("← К группам")
+            try:
+                self._btn_back.clicked.disconnect()
+            except Exception:
+                pass
+            self._btn_back.clicked.connect(lambda: self._show_page(PAGE_HUB))
+        self._btn_back.setVisible(index != PAGE_HUB)
+        self._btn_save.setVisible(
+            index in (PAGE_HUB, PAGE_SPEED, PAGE_PID, PAGE_ROLL)
         )
-        self._init_form_guard(
-            list(self._form_widgets_list),
-            dirty_changed=self._on_dirty_changed,
-        )
-        root.addStretch()
-        self._refresh_emulator_ui()
-        self._refresh_invert_ui()
 
     def showEvent(self, event) -> None:  # noqa: ANN001
         super().showEvent(event)
+        self._show_page(PAGE_HUB)
         self._refresh_emulator_ui()
         self._refresh_invert_ui()
 
     def update_snapshot(self, snap: MachineSnapshot) -> None:
         self._last_pulses = int(snap.encoder_pulses)
         self._cal_pulses.setText(f"Импульсы: {self._last_pulses}")
+        if snap.connected:
+            self._pid_trend.push(float(snap.speed_mpm), float(snap.pid_out_pct))
         moving = snap.state in MOVING_STATES
-        self._btn_calibrate.setEnabled(snap.connected and not moving)
-        self._btn_invert.setEnabled(snap.connected)
+        idle = snap.state == MachineState.IDLE
+        tuning = bool(snap.autotune_active)
+        self._btn_calibrate.setEnabled(snap.connected and not moving and not tuning)
+        self._btn_invert.setEnabled(snap.connected and not tuning)
+        self._btn_autotune.setEnabled(snap.connected and idle and not tuning)
+        self._btn_abort_tune.setEnabled(snap.connected and tuning)
+
+        st = snap.autotune_status or "idle"
+        msg = snap.autotune_message or ""
+        if tuning:
+            self._autotune_status.setText(f"Автонастройка: {msg or 'идёт…'}")
+            self._autotune_status.setStyleSheet("color: #ffb020; font-size: 9pt;")
+        elif st == "ok":
+            self._autotune_status.setText(f"Автонастройка: {msg}")
+            self._autotune_status.setStyleSheet("color: #3ddc84; font-size: 9pt;")
+            if self._prev_autotune_status != "ok":
+                try:
+                    settings = self._bridge.read_settings()
+                    if settings:
+                        self._kp.blockSignals(True)
+                        self._ti.blockSignals(True)
+                        self._kd.blockSignals(True)
+                        self._kp.setValue(float(settings.get("pid_kp", 0.0)))
+                        self._ti.setValue(float(settings.get("pid_ti", 0.0)))
+                        self._kd.setValue(float(settings.get("pid_kd", 0.0)))
+                        self._kp.blockSignals(False)
+                        self._ti.blockSignals(False)
+                        self._kd.blockSignals(False)
+                        self.clear_form_dirty()
+                except Exception:
+                    pass
+        elif st in ("fail", "aborted"):
+            self._autotune_status.setText(f"Автонастройка: {msg or st}")
+            self._autotune_status.setStyleSheet("color: #ff4d4d; font-size: 9pt;")
+        else:
+            self._autotune_status.setText(
+                "Автонастройка PID: тест на скорости JOG (только в Ожидании)."
+            )
+            self._autotune_status.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        self._prev_autotune_status = st
+
+    def _start_autotune(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Автонастройка PID",
+            "Будет короткий тестовый прогон на скорости JOG с колебаниями частоты ПЧ "
+            "(relay / Ziegler–Nichols).\n"
+            "Материал должен быть заправлен. СТОП — прерывание.\n\n"
+            "Запустить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if self._bridge.start_pid_autotune():
+            play_ok()
+            self._autotune_status.setText("Автонастройка: запуск…")
+        else:
+            play_error()
+            QMessageBox.warning(
+                self,
+                "Автонастройка PID",
+                "Не удалось запустить. Нужны: Ожидание, связь, нет аварии ПЧ/Modbus.",
+            )
+
+    def _abort_autotune(self) -> None:
+        if self._bridge.abort_pid_autotune():
+            play_ok()
+        else:
+            play_error()
 
     def _on_dirty_changed(self, dirty: bool) -> None:
         self._dirty_label.setText("Не сохранено" if dirty else "")
@@ -442,3 +689,6 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._btn_save.setEnabled(enabled)
         self._btn_emu.setEnabled(enabled)
         self._btn_invert.setEnabled(enabled)
+        if not enabled:
+            self._btn_autotune.setEnabled(False)
+            self._btn_abort_tune.setEnabled(False)
