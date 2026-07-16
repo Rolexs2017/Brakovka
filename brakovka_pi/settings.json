@@ -24,15 +24,16 @@
     "fails_before_reconnect": 2
   },
   "vfd": {
-    "reg_freq": 8192,
-    "reg_cmd": 8193,
-    "reg_status": 8194,
-    "reg_fault": 8195,
-    "reg_freq_out": 8196,
+    "profile": "delta_cp2000",
+    "reg_cmd": 8192,
+    "reg_freq": 8193,
+    "reg_status": 8192,
+    "reg_fault": 8448,
+    "reg_freq_out": 8451,
     "freq_scale": 100,
     "cmd_forward": 1,
     "cmd_reverse": 2,
-    "cmd_stop": 5
+    "cmd_stop": 0
   },
   "opcua": {
     "endpoint": "opc.tcp://0.0.0.0:4840/",

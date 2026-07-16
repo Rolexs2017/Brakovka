@@ -66,15 +66,17 @@ class SerialConfig:
 
 @dataclass(frozen=True)
 class VfdConfig:
-    reg_freq: int = 0x2000
-    reg_cmd: int = 0x2001
-    reg_status: int = 0x2002
-    reg_fault: int = 0x2003
-    reg_freq_out: int = 0x2004
+    # Delta CP2000 Modbus map (holding registers, FC 03/06).
+    reg_cmd: int = 0x2000
+    reg_freq: int = 0x2001
+    reg_status: int = 0x2000
+    reg_fault: int = 0x2100
+    reg_freq_out: int = 0x2103
     freq_scale: int = 100
     cmd_forward: int = 0x0001
     cmd_reverse: int = 0x0002
-    cmd_stop: int = 0x0005
+    cmd_stop: int = 0x0000
+    profile: str = "delta_cp2000"
 
 
 @dataclass(frozen=True)
@@ -186,15 +188,16 @@ def load_runtime_config():
     )
 
     vfd = VfdConfig(
-        reg_freq=int(s.vfd.get("reg_freq", 0x2000)),
-        reg_cmd=int(s.vfd.get("reg_cmd", 0x2001)),
-        reg_status=int(s.vfd.get("reg_status", 0x2002)),
-        reg_fault=int(s.vfd.get("reg_fault", 0x2003)),
-        reg_freq_out=int(s.vfd.get("reg_freq_out", 0x2004)),
+        reg_cmd=int(s.vfd.get("reg_cmd", 0x2000)),
+        reg_freq=int(s.vfd.get("reg_freq", 0x2001)),
+        reg_status=int(s.vfd.get("reg_status", 0x2000)),
+        reg_fault=int(s.vfd.get("reg_fault", 0x2100)),
+        reg_freq_out=int(s.vfd.get("reg_freq_out", 0x2103)),
         freq_scale=int(s.vfd.get("freq_scale", 100)),
         cmd_forward=int(s.vfd.get("cmd_forward", 0x0001)),
         cmd_reverse=int(s.vfd.get("cmd_reverse", 0x0002)),
-        cmd_stop=int(s.vfd.get("cmd_stop", 0x0005)),
+        cmd_stop=int(s.vfd.get("cmd_stop", 0x0000)),
+        profile=str(s.vfd.get("profile", "delta_cp2000")),
     )
 
     opcua = OpcUaConfig(

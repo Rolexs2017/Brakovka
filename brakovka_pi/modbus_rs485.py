@@ -310,6 +310,64 @@ class Rs485Vfd:
             return True
         return await self.reconnect()
 
+    def _decode_status(self, status_word: int, err_code: int | None) -> dict:
+        if self._vfd.profile == "delta_cp2000":
+            fault_code = 0
+            warning_code = 0
+            if err_code is not None:
+                fault_code = int(err_code) & 0xFF
+                warning_code = (int(err_code) >> 8) & 0xFF
+            return {
+                "status_word": int(status_word),
+                "error_code": int(fault_code),
+                "fault": fault_code != 0,
+                "warning": warning_code != 0,
+            }
+
+        fault_bit = bool(status_word & (1 << 4))
+        err = int(err_code or 0)
+        return {
+            "status_word": int(status_word),
+            "error_code": err,
+            "fault": fault_bit or err != 0,
+            "warning": bool(status_word & (1 << 6)),
+        }
+
+    async def _read_holding_u16(self, address: int, *, optional: bool = False) -> int | None:
+        try:
+            rr = await self._client.read_holding_registers(
+                address,
+                count=1,
+                device_id=self._unit_id,
+            )
+        except ModbusIOException as exc:
+            if optional:
+                log.debug("Modbus optional read failed addr=0x%04X: %s", address, exc)
+                return None
+            raise
+        except Exception as exc:
+            if optional:
+                log.debug("Modbus optional read error addr=0x%04X: %s", address, exc)
+                return None
+            raise
+        finally:
+            self._rx_mode()
+
+        if rr.isError():
+            if optional:
+                log.debug("Modbus optional read error response addr=0x%04X: %s", address, rr)
+                return None
+            log.warning("Modbus error response addr=0x%04X: %s", address, rr)
+            self._note_failure()
+            return None
+
+        if not getattr(rr, "registers", None):
+            if optional:
+                return None
+            self._note_failure()
+            return None
+        return int(rr.registers[0])
+
     async def write_command(self, cmd: VfdCommand) -> bool:
         if not await self.ensure_connected():
             return False
@@ -323,6 +381,7 @@ class Rs485Vfd:
         hz_scaled = int(round(hz * float(self._vfd.freq_scale)))
 
         try:
+            # Delta CP2000: frequency (2001H) then operation command (2000H).
             await self._client.write_register(
                 self._vfd.reg_freq, hz_scaled, device_id=self._unit_id
             )
@@ -347,21 +406,15 @@ class Rs485Vfd:
             return {}
 
         try:
-            rr_status = await self._client.read_holding_registers(
-                self._vfd.reg_status,
-                count=1,
-                device_id=self._unit_id,
-            )
-            rr_err = await self._client.read_holding_registers(
-                self._vfd.reg_fault,
-                count=1,
-                device_id=self._unit_id,
-            )
-            rr_freq_out = await self._client.read_holding_registers(
-                self._vfd.reg_freq_out,
-                count=1,
-                device_id=self._unit_id,
-            )
+            status_word = await self._read_holding_u16(self._vfd.reg_status)
+            if status_word is None:
+                return {}
+
+            fault_word: int | None = None
+            if self._vfd.reg_fault != self._vfd.reg_status:
+                fault_word = await self._read_holding_u16(self._vfd.reg_fault, optional=True)
+
+            freq_out_raw = await self._read_holding_u16(self._vfd.reg_freq_out, optional=True)
         except ModbusIOException as exc:
             log.warning("Modbus read failed: %s", exc)
             self._note_failure()
@@ -370,33 +423,16 @@ class Rs485Vfd:
             log.warning("Modbus read error: %s", exc)
             self._note_failure()
             return {}
-        finally:
-            self._rx_mode()
 
-        if rr_status.isError() or rr_err.isError() or rr_freq_out.isError():
-            log.warning(
-                "Modbus error response: status=%s fault=%s freq_out=%s",
-                rr_status,
-                rr_err,
-                rr_freq_out,
-            )
-            self._note_failure()
-            return {}
-
-        status_word = int(rr_status.registers[0]) if getattr(rr_status, "registers", None) else 0
-        err_code = int(rr_err.registers[0]) if getattr(rr_err, "registers", None) else 0
-        freq_out_raw = (
-            int(rr_freq_out.registers[0]) if getattr(rr_freq_out, "registers", None) else 0
+        freq_out_hz = (
+            float(freq_out_raw) / float(self._vfd.freq_scale)
+            if freq_out_raw is not None
+            else 0.0
         )
-        freq_out_hz = float(freq_out_raw) / float(self._vfd.freq_scale)
-        fault_bit = bool(status_word & (1 << 4))
+        decoded = self._decode_status(status_word, fault_word)
         self._note_success()
 
         return {
-            "status_word": status_word,
-            "error_code": err_code,
+            **decoded,
             "freq_out_hz": freq_out_hz,
-            # ПЧВ: bit4 в статусе и/или ненулевой код в reg_fault
-            "fault": fault_bit or err_code != 0,
-            "warning": bool(status_word & (1 << 6)),
         }

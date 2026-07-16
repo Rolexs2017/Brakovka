@@ -55,9 +55,9 @@ print(
     f"unit_id={serial_cfg.unit_id} DE=GPIO{serial_cfg.rs485_de}"
 )
 print(
-    f"vfd regs: freq={vfd_cfg.reg_freq} cmd={vfd_cfg.reg_cmd} "
+    f"vfd regs: profile={vfd_cfg.profile} cmd={vfd_cfg.reg_cmd} freq={vfd_cfg.reg_freq} "
     f"status={vfd_cfg.reg_status} fault={vfd_cfg.reg_fault} "
-    f"scale={vfd_cfg.freq_scale}"
+    f"freq_out={vfd_cfg.reg_freq_out} scale={vfd_cfg.freq_scale}"
 )
 
 port = Path(serial_cfg.port)
