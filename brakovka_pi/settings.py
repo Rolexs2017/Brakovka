@@ -98,6 +98,22 @@ def save_emulator(enabled: bool) -> None:
     _write_settings_file(data)
 
 
+def read_serial_unit_id() -> int:
+    """Modbus RTU slave address for the VFD (``serial.unit_id`` in settings.json)."""
+    data = _read_settings_file()
+    serial = data.get("serial") or {}
+    return max(1, min(247, int(serial.get("unit_id", 1))))
+
+
+def save_serial_unit_id(unit_id: int) -> None:
+    """Persist VFD Modbus address; takes effect on next controller start."""
+    data = _read_settings_file()
+    serial = dict(data.get("serial") or {})
+    serial["unit_id"] = max(1, min(247, int(unit_id)))
+    data["serial"] = serial
+    _write_settings_file(data)
+
+
 def get_settings_password(settings: Settings | None = None) -> str:
     """Password from ``BRAKOVKA_SETTINGS_PASSWORD`` or ``settings.ui.settings_password`` (default 4444)."""
     env = os.getenv("BRAKOVKA_SETTINGS_PASSWORD")

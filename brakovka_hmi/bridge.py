@@ -23,8 +23,10 @@ from brakovka_pi.setpoints import (
 from brakovka_pi.gpio_io import GpioLevels
 from brakovka_pi.settings import (
     read_emulator_setting,
+    read_serial_unit_id,
     save_emulator,
     save_machine_section,
+    save_serial_unit_id,
 )
 from brakovka_pi.state import MOVING_STATES, RUN_LIKE_STATES
 
@@ -175,6 +177,19 @@ class LocalBridge:
             return True
         except Exception:
             log.exception("Failed to persist emulator flag to settings.json")
+            return False
+
+    def read_vfd_unit_id(self) -> int:
+        """Configured Modbus address for the VFD (``serial.unit_id``, next start)."""
+        return read_serial_unit_id()
+
+    def write_vfd_unit_id(self, unit_id: int) -> bool:
+        """Save VFD Modbus address to settings.json. Needs app restart to apply."""
+        try:
+            save_serial_unit_id(int(unit_id))
+            return True
+        except Exception:
+            log.exception("Failed to persist serial.unit_id to settings.json")
             return False
 
     def get_encoder_invert(self) -> bool:

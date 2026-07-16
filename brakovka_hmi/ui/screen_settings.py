@@ -92,6 +92,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
 
         self._btn_save.clicked.connect(self._save)
         self._btn_emu.clicked.connect(self._toggle_emulator)
+        self._btn_vfd_addr_save.clicked.connect(self._save_vfd_unit_id)
         self._btn_invert.clicked.connect(self._toggle_encoder_invert)
         self._btn_calibrate.clicked.connect(self._calibrate_roll)
         self._btn_autotune.clicked.connect(self._start_autotune)
@@ -122,6 +123,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._show_page(PAGE_HUB)
         self._refresh_emulator_ui()
         self._refresh_invert_ui()
+        self._refresh_vfd_unit_ui()
 
     def _build_fields(self) -> None:
         self._speed = TouchDoubleSpinBox(keypad_title="Рабочая скорость")
@@ -179,6 +181,9 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._roll_dia.setRange(20, 1000)
         self._roll_dia.setSuffix(" мм")
 
+        self._vfd_unit_id = TouchSpinBox(keypad_title="Адрес Modbus ПЧ")
+        self._vfd_unit_id.setRange(1, 247)
+
         self._cal_length = TouchDoubleSpinBox(keypad_title="Фактическая длина")
         self._cal_length.setRange(0.01, 10000.0)
         self._cal_length.setDecimals(2)
@@ -199,6 +204,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
             self._kd,
             self._roll_dia,
             self._cal_length,
+            self._vfd_unit_id,
         ):
             _fix_field(w)
 
@@ -237,7 +243,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
             0,
         )
         grid.addWidget(
-            self._group_button("Сервис", "Эмуляция, выход", PAGE_SERVICE),
+            self._group_button("Сервис", "Адрес ПЧ, эмуляция, выход", PAGE_SERVICE),
             1,
             1,
         )
@@ -368,6 +374,24 @@ class SettingsScreen(EditableFormMixin, QWidget):
         lay = QVBoxLayout(page)
         lay.setSpacing(12)
 
+        vfd_row = QHBoxLayout()
+        vfd_row.setSpacing(10)
+        self._btn_vfd_addr_save = QPushButton("Сохранить адрес")
+        self._btn_vfd_addr_save.setObjectName("cmd")
+        self._btn_vfd_addr_save.setMinimumWidth(180)
+        self._vfd_addr_hint = QLabel(
+            "Modbus RTU slave address частотника (serial.unit_id). "
+            "Должен совпадать с настройкой на ПЧ. Применяется после перезапуска."
+        )
+        self._vfd_addr_hint.setWordWrap(True)
+        self._vfd_addr_hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        vfd_form = _form()
+        vfd_form.addRow("Адрес Modbus ПЧ", self._vfd_unit_id)
+        vfd_row.addLayout(vfd_form)
+        vfd_row.addWidget(self._btn_vfd_addr_save)
+        vfd_row.addWidget(self._vfd_addr_hint, stretch=1)
+        lay.addLayout(vfd_row)
+
         emu_row = QHBoxLayout()
         emu_row.setSpacing(12)
         self._btn_emu = QPushButton()
@@ -423,6 +447,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._show_page(PAGE_HUB)
         self._refresh_emulator_ui()
         self._refresh_invert_ui()
+        self._refresh_vfd_unit_ui()
 
     def update_snapshot(self, snap: MachineSnapshot) -> None:
         self._last_pulses = int(snap.encoder_pulses)
@@ -635,6 +660,51 @@ class SettingsScreen(EditableFormMixin, QWidget):
             hints.append("Сейчас работа с реальным ПЧ / AS5600.")
         self._emu_hint.setText(" ".join(hints))
 
+    def _refresh_vfd_unit_ui(self) -> None:
+        try:
+            unit_id = int(self._bridge.read_vfd_unit_id())
+        except Exception:
+            unit_id = 1
+        self._vfd_unit_id.blockSignals(True)
+        self._vfd_unit_id.setValue(unit_id)
+        self._vfd_unit_id.blockSignals(False)
+
+    def _save_vfd_unit_id(self) -> None:
+        unit_id = int(self._vfd_unit_id.value())
+        try:
+            current = int(self._bridge.read_vfd_unit_id())
+        except Exception:
+            current = unit_id
+        if unit_id == current:
+            QMessageBox.information(
+                self,
+                "Адрес Modbus ПЧ",
+                f"Адрес уже сохранён: {unit_id}.",
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Адрес Modbus ПЧ",
+            f"Сохранить адрес Modbus ПЧ: {unit_id}?\n\n"
+            "Изменение вступит в силу после перезапуска приложения.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if self._bridge.write_vfd_unit_id(unit_id):
+            play_ok()
+            self._refresh_vfd_unit_ui()
+            QMessageBox.information(
+                self,
+                "Адрес Modbus ПЧ",
+                f"Адрес {unit_id} сохранён в settings.json.\n"
+                "Перезапустите приложение для применения.",
+            )
+        else:
+            play_error()
+            QMessageBox.warning(self, "Адрес Modbus ПЧ", "Не удалось сохранить настройку.")
+
     def _toggle_emulator(self) -> None:
         new_value = not self._emu_desired
         action = "включить" if new_value else "выключить"
@@ -688,6 +758,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
     def set_commands_enabled(self, enabled: bool) -> None:
         self._btn_save.setEnabled(enabled)
         self._btn_emu.setEnabled(enabled)
+        self._btn_vfd_addr_save.setEnabled(enabled)
         self._btn_invert.setEnabled(enabled)
         if not enabled:
             self._btn_autotune.setEnabled(False)
