@@ -267,11 +267,11 @@ def build_stylesheet() -> str:
     }}
     QRadioButton#pidMethod {{
         min-height: 44px;
-        spacing: 14px;
+        spacing: 10px;
         color: {t.TEXT};
-        font-size: 11pt;
+        font-size: 10pt;
         font-weight: 600;
-        padding: 6px 4px;
+        padding: 6px 8px;
     }}
     QRadioButton#pidMethod::indicator {{
         width: 26px;

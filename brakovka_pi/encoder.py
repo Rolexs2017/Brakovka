@@ -44,6 +44,58 @@ class EncoderTelemetry:
     magnet_ok: bool = True
 
 
+class SpeedOutlierReject:
+    """
+    Drop upward speed spikes before averaging/PID.
+
+    Rejects samples above max_mpm × OVERSPEED_FACTOR and sudden upward jumps
+    vs the last accepted value. Downward steps (stop/decel) are always accepted.
+    On reject, returns the last accepted speed (hold).
+    """
+
+    OVERSPEED_FACTOR = 1.5
+
+    def __init__(
+        self,
+        max_mpm: float = 300.0,
+        *,
+        max_delta_mpm: float = 40.0,
+        spike_ratio: float = 0.85,
+        min_ref_mpm: float = 5.0,
+    ) -> None:
+        self._max_mpm = max(1.0, float(max_mpm))
+        self._max_delta_mpm = max(1.0, float(max_delta_mpm))
+        self._spike_ratio = max(0.0, float(spike_ratio))
+        self._min_ref_mpm = max(0.0, float(min_ref_mpm))
+        self._last_mpm = 0.0
+        self._primed = False
+
+    def set_max_mpm(self, max_mpm: float) -> None:
+        self._max_mpm = max(1.0, float(max_mpm))
+
+    def reset(self, value_mpm: float = 0.0) -> None:
+        self._last_mpm = max(0.0, float(value_mpm))
+        self._primed = False
+
+    def update(self, raw_mpm: float) -> float:
+        raw = max(0.0, float(raw_mpm))
+        if raw > self._max_mpm * self.OVERSPEED_FACTOR:
+            return self._last_mpm if self._primed else 0.0
+
+        if (
+            self._primed
+            and self._last_mpm >= self._min_ref_mpm
+            and raw > self._last_mpm + max(
+                self._max_delta_mpm, self._last_mpm * self._spike_ratio
+            )
+        ):
+            return self._last_mpm
+
+        self._primed = True
+        self._last_mpm = raw
+        return raw
+
+
 class SpeedMovingAverage:
     """Arithmetic mean over the last N speed samples (m/min)."""
 

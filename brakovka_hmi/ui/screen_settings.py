@@ -303,9 +303,9 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._pid_method_group.setExclusive(True)
         self._pid_method_buttons.clear()
 
-        method_col = QVBoxLayout()
-        method_col.setSpacing(4)
-        method_col.setContentsMargins(4, 0, 0, 0)
+        method_row = QHBoxLayout()
+        method_row.setSpacing(8)
+        method_row.setContentsMargins(0, 0, 0, 0)
         for method in PID_TUNE_METHOD_ORDER:
             rb = QRadioButton(PID_TUNE_METHOD_LABELS[method], page)
             rb.setObjectName("pidMethod")
@@ -315,9 +315,9 @@ class SettingsScreen(EditableFormMixin, QWidget):
             self._pid_method_group.addButton(rb)
             self._pid_method_buttons[method] = rb
             rb.toggled.connect(self._on_pid_method_radio_toggled)
-            method_col.addWidget(rb)
+            method_row.addWidget(rb, stretch=1)
         self._pid_method_buttons[PidTuneMethod.RELAY.value].setChecked(True)
-        lay.addLayout(method_col)
+        lay.addLayout(method_row)
 
         self._pid_method_hint = QLabel(PID_TUNE_METHOD_HINTS[PidTuneMethod.RELAY.value])
         self._pid_method_hint.setWordWrap(True)

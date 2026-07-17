@@ -13,6 +13,7 @@ from .encoder import (
     Encoder,
     PID_REGULATOR_SPEED_AVG_N,
     SpeedMovingAverage,
+    SpeedOutlierReject,
     ThreadedEncoder,
     speed_mpm_from_length_delta,
 )
@@ -219,6 +220,7 @@ async def run_controller(
         watchdog_limit_s = float(timing_cfg.watchdog_limit_s)
         autotuner: PidAutotuner | StepResponseAutotuner | None = None
         pid_speed_avg = SpeedMovingAverage(PID_REGULATOR_SPEED_AVG_N)
+        speed_outlier = SpeedOutlierReject(max_mpm=m.params.max_ramp_speed_mpm)
         prev_wound_length_m: float | None = None
         last_speed_mpm = 0.0
 
@@ -249,6 +251,7 @@ async def run_controller(
                     )
                 await opc.poll_commands_and_setpoints()
                 await opc.clear_one_shots()
+                speed_outlier.set_max_mpm(m.params.max_ramp_speed_mpm)
                 if enc_thread is not None:
                     enc_thread.set_roll_diameter_m(m.params.roll_diameter_m)
                     enc_thread.set_max_speed_mpm(m.params.max_ramp_speed_mpm)
@@ -292,6 +295,7 @@ async def run_controller(
                     m.apply_new_unwind_roll()
                     m.reset_pid()
                     pid_speed_avg.reset(0.0)
+                    speed_outlier.reset(0.0)
                     prev_wound_length_m = None
                     machine_log.info(
                         "Reset roll: length=%.0f m diameter=%.0f mm remaining=%.1f m",
@@ -303,6 +307,7 @@ async def run_controller(
                     encoder.reset_wound()
                     m.reset_pid()
                     pid_speed_avg.reset(0.0)
+                    speed_outlier.reset(0.0)
                     prev_wound_length_m = None
                     machine_log.info("Reset wound length")
 
@@ -377,7 +382,8 @@ async def run_controller(
                     machine_log.info("Encoder recovered")
                 prev_encoder_error = m.telem.encoder_error
 
-                actual_mpm = pid_speed_avg.update(last_speed_mpm)
+                clean_mpm = speed_outlier.update(last_speed_mpm)
+                actual_mpm = pid_speed_avg.update(clean_mpm)
                 m.telem.speed_mpm = actual_mpm
                 stopping = state == MachineState.STOPPING
 
