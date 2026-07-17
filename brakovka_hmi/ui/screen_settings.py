@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QRadioButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -186,21 +188,8 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._kd.setRange(0.0, 100.0)
         self._kd.setDecimals(2)
 
-        self._pid_method_group = QButtonGroup(self)
-        self._pid_method_group.setExclusive(True)
-        self._pid_method_buttons: dict[str, QPushButton] = {}
-        for method in PID_TUNE_METHOD_ORDER:
-            btn = QPushButton(PID_TUNE_METHOD_LABELS[method])
-            btn.setObjectName("pidMethod")
-            btn.setCheckable(True)
-            btn.setMinimumHeight(48)
-            self._pid_method_group.addButton(btn)
-            self._pid_method_buttons[method] = btn
-        relay_btn = self._pid_method_buttons[PidTuneMethod.RELAY.value]
-        relay_btn.setChecked(True)
-        for btn in self._pid_method_buttons.values():
-            btn.clicked.connect(self._on_pid_method_changed)
-            btn.clicked.connect(self._mark_form_dirty)
+        self._pid_method_group: QButtonGroup | None = None
+        self._pid_method_buttons: dict[str, QRadioButton] = {}
 
         self._mpm_per_hz = TouchDoubleSpinBox(keypad_title="Feedforward (м/мин)/Гц")
         self._mpm_per_hz.setRange(0.01, 1000.0)
@@ -310,10 +299,24 @@ class SettingsScreen(EditableFormMixin, QWidget):
         method_title.setStyleSheet("color: #8aa4b8; font-size: 10pt; font-weight: 600;")
         lay.addWidget(method_title)
 
+        self._pid_method_group = QButtonGroup(page)
+        self._pid_method_group.setExclusive(True)
+        self._pid_method_buttons.clear()
+
         method_col = QVBoxLayout()
-        method_col.setSpacing(8)
+        method_col.setSpacing(4)
+        method_col.setContentsMargins(4, 0, 0, 0)
         for method in PID_TUNE_METHOD_ORDER:
-            method_col.addWidget(self._pid_method_buttons[method])
+            rb = QRadioButton(PID_TUNE_METHOD_LABELS[method], page)
+            rb.setObjectName("pidMethod")
+            rb.setMinimumHeight(44)
+            rb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            rb.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._pid_method_group.addButton(rb)
+            self._pid_method_buttons[method] = rb
+            rb.toggled.connect(self._on_pid_method_radio_toggled)
+            method_col.addWidget(rb)
+        self._pid_method_buttons[PidTuneMethod.RELAY.value].setChecked(True)
         lay.addLayout(method_col)
 
         self._pid_method_hint = QLabel(PID_TUNE_METHOD_HINTS[PidTuneMethod.RELAY.value])
@@ -568,6 +571,12 @@ class SettingsScreen(EditableFormMixin, QWidget):
             self._autotune_status.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
         self._prev_autotune_status = st
 
+    def _on_pid_method_radio_toggled(self, checked: bool) -> None:
+        if not checked:
+            return
+        self._mark_form_dirty()
+        self._on_pid_method_changed()
+
     def _selected_pid_tune_method(self) -> str:
         for method, btn in self._pid_method_buttons.items():
             if btn.isChecked():
@@ -575,6 +584,8 @@ class SettingsScreen(EditableFormMixin, QWidget):
         return PidTuneMethod.RELAY.value
 
     def _set_pid_tune_method(self, method: str) -> None:
+        if not self._pid_method_buttons:
+            return
         btn = self._pid_method_buttons.get(method)
         for b in self._pid_method_buttons.values():
             b.blockSignals(True)

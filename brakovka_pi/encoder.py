@@ -25,8 +25,17 @@ def calibrated_roll_diameter_m(true_length_m: float, pulses: int) -> float | Non
     return (float(true_length_m) * float(COUNTS_PER_REV)) / (pi * float(pulses))
 
 
+def speed_mpm_from_length_delta(delta_m: float, dt_s: float) -> float:
+    """Web speed (m/min) from measuring-roller length change over dt_s."""
+    if dt_s <= 1e-6:
+        return 0.0
+    return (fabs(float(delta_m)) / dt_s) * 60.0
+
+
 @dataclass
 class EncoderTelemetry:
+    """Snapshot from encoder thread (speed is computed in the controller loop)."""
+
     speed_mpm: float = 0.0
     wound_m: float = 0.0
     unwind_m: float = 0.0
@@ -74,7 +83,6 @@ class Encoder:
         self._spike_m = spike_threshold_m
         self._max_speed_mpm = max(1.0, float(max_speed_mpm))
         self._invert = bool(invert)
-        self._last_speed_mpm = 0.0
 
     def set_roll_diameter_m(self, roll_diameter_m: float) -> None:
         if roll_diameter_m <= 0:
@@ -113,9 +121,9 @@ class Encoder:
         max_m = (self._max_speed_mpm / 60.0) * dt_s * 1.5
         return max(1, int(max_m / mpc) + 1)
 
-    def _telem(self, *, speed_mpm: float, ok: bool, magnet_ok: bool = True) -> EncoderTelemetry:
+    def _telem(self, *, ok: bool, magnet_ok: bool = True) -> EncoderTelemetry:
         return EncoderTelemetry(
-            speed_mpm=speed_mpm,
+            speed_mpm=0.0,
             wound_m=self._length_m(self._wound_pulses),
             unwind_m=self._length_m(self._unwind_pulses),
             pulses=self._wound_pulses,
@@ -123,36 +131,25 @@ class Encoder:
             magnet_ok=magnet_ok,
         )
 
-    def step(self, dt_s: float, *, wound_enable: bool = True) -> EncoderTelemetry:
+    def poll(self, dt_s: float, *, wound_enable: bool = True) -> EncoderTelemetry:
         """
-        dt_s: фактический период между вызовами
-        wound_enable: учитывать метраж потребителя (обычно True — ролик меряет факт)
+        One AS5600 sample: unwrap angle → pulses → meterage.
 
-        Метраж = накопительные импульсы × (π·D / 4096).
-        Скорость — мгновенная |Δм|/dt (без сглаживания на энкодере).
-        Знак импульсов — физический поворот AS5600 (см. encoder_invert).
-
-        ok=False только при сбое чтения I2C. Отсев спайков не считается аварией
-        (иначе лампа «Ошибка энкодера» мигает при каждом резком Δ).
+        Speed is **not** calculated here; the controller derives it from wound_m.
         """
         if dt_s <= 0:
-            return self._telem(speed_mpm=self._last_speed_mpm, ok=True)
+            return self._telem(ok=True)
 
         try:
             s = self._as.read()
         except Exception:
-            return self._telem(
-                speed_mpm=self._last_speed_mpm,
-                ok=False,
-                magnet_ok=False,
-            )
+            return self._telem(ok=False, magnet_ok=False)
 
         magnet_ok = bool(s.status & STATUS_MD)
         raw = int(s.raw) & 0x0FFF
         if self._prev_raw is None:
             self._prev_raw = raw
-            self._last_speed_mpm = 0.0
-            return self._telem(speed_mpm=0.0, ok=True, magnet_ok=magnet_ok)
+            return self._telem(ok=True, magnet_ok=magnet_ok)
 
         delta = raw - self._prev_raw
         self._prev_raw = raw
@@ -167,32 +164,27 @@ class Encoder:
         mpc = self._meters_per_count()
         delta_m = float(signed) * mpc
 
-        # Reject I2C/unwrap glitches and overspeed samples (do not raise encoder_error).
         max_counts = self._max_counts_per_step(dt_s)
         if fabs(delta_m) > self._spike_m or abs(signed) > max_counts:
             signed = 0
-            delta_m = 0.0
-            speed_mpm = self._last_speed_mpm
-        else:
+
+        if signed != 0:
             self._unwind_pulses = max(0, self._unwind_pulses + signed)
             if wound_enable:
                 self._wound_pulses = max(0, self._wound_pulses + signed)
-            speed_mpm = (fabs(delta_m) / dt_s) * 60.0
-            self._last_speed_mpm = speed_mpm
 
-        return self._telem(speed_mpm=speed_mpm, ok=True, magnet_ok=magnet_ok)
+        return self._telem(ok=True, magnet_ok=magnet_ok)
 
 
 class ThreadedEncoder:
     """
-    Отдельный поток: I2C AS5600 → импульсы → скорость/метраж.
+    Dedicated thread: AS5600 I2C polling at the maximum sustainable rate.
 
-    Контроллер только читает snapshot() и шлёт команды сброса/настроек.
+    Accumulates pulses and meterage only; speed is derived in the controller task.
     """
 
-    def __init__(self, encoder: Encoder, *, period_s: float = 0.01) -> None:
+    def __init__(self, encoder: Encoder) -> None:
         self._enc = encoder
-        self._period_s = max(0.002, float(period_s))
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -211,7 +203,7 @@ class ThreadedEncoder:
             daemon=True,
         )
         self._thread.start()
-        log.info("Encoder thread started (period=%.3f s)", self._period_s)
+        log.info("Encoder thread started (max I2C poll rate)")
 
     def stop(self, timeout_s: float = 2.0) -> None:
         self._stop.set()
@@ -255,12 +247,13 @@ class ThreadedEncoder:
 
     def _run(self) -> None:
         last_t = monotonic()
-        next_t = last_t
         while not self._stop.is_set():
             now = monotonic()
             dt = now - last_t
+            if dt < 1e-5:
+                continue
             last_t = now
-            dt = min(max(dt, 1e-4), 0.5)
+            dt = min(dt, 0.5)
 
             with self._lock:
                 if self._pending_reset_unwind:
@@ -269,13 +262,4 @@ class ThreadedEncoder:
                 if self._pending_reset_wound:
                     self._enc.reset_wound()
                     self._pending_reset_wound = False
-                self._telem = self._enc.step(dt, wound_enable=self._wound_enable)
-
-            next_t += self._period_s
-            sleep_s = next_t - monotonic()
-            if sleep_s > 0.0:
-                if self._stop.wait(sleep_s):
-                    break
-            else:
-                # Cycle ran long (I2C stall) — resync schedule.
-                next_t = monotonic()
+                self._telem = self._enc.poll(dt, wound_enable=self._wound_enable)

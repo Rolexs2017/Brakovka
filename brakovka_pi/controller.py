@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING
 from .brake_pwm import BrakePwm
 from .commands import merge_command_dicts
 from .config import load_runtime_config, resolve_emulator
-from .encoder import Encoder, PID_REGULATOR_SPEED_AVG_N, SpeedMovingAverage, ThreadedEncoder
+from .encoder import (
+    Encoder,
+    PID_REGULATOR_SPEED_AVG_N,
+    SpeedMovingAverage,
+    ThreadedEncoder,
+    speed_mpm_from_length_delta,
+)
 from .emulation import EmulatedVfd, SimEncoder
 from .gpio_io import GpioInputs
 from .logutil import setup_logging
@@ -194,13 +200,10 @@ async def run_controller(
             max_speed_mpm=m.params.max_ramp_speed_mpm,
             invert=m.params.encoder_invert,
         )
-        enc_thread = ThreadedEncoder(enc_hw, period_s=timing_cfg.task_period_s)
+        enc_thread = ThreadedEncoder(enc_hw)
         enc_thread.start()
         encoder = enc_thread
-        machine_log.info(
-            "Hardware encoder in dedicated thread (period=%.3f s)",
-            timing_cfg.task_period_s,
-        )
+        machine_log.info("Hardware encoder in dedicated thread (max I2C poll rate)")
 
     try:
         last_freq_cmd = 0.0
@@ -216,6 +219,8 @@ async def run_controller(
         watchdog_limit_s = float(timing_cfg.watchdog_limit_s)
         autotuner: PidAutotuner | StepResponseAutotuner | None = None
         pid_speed_avg = SpeedMovingAverage(PID_REGULATOR_SPEED_AVG_N)
+        prev_wound_length_m: float | None = None
+        last_speed_mpm = 0.0
 
         p_task = _Periodic(timing_cfg.task_period_s)
         p_opc_poll = _Periodic(timing_cfg.opcua_poll_period_s)
@@ -287,6 +292,7 @@ async def run_controller(
                     m.apply_new_unwind_roll()
                     m.reset_pid()
                     pid_speed_avg.reset(0.0)
+                    prev_wound_length_m = None
                     machine_log.info(
                         "Reset roll: length=%.0f m diameter=%.0f mm remaining=%.1f m",
                         m.params.unwind_roll_length_m,
@@ -297,6 +303,7 @@ async def run_controller(
                     encoder.reset_wound()
                     m.reset_pid()
                     pid_speed_avg.reset(0.0)
+                    prev_wound_length_m = None
                     machine_log.info("Reset wound length")
 
                 if inp.start_pulse:
@@ -315,25 +322,38 @@ async def run_controller(
                         forward=forward,
                         wound_enable=wound_enable,
                     )
-                    m.telem.speed_mpm = float(e["speed_mpm"])
-                    m.telem.wound_length_m = float(e["wound_m"])
+                    wound_m = float(e["wound_m"])
+                    m.telem.wound_length_m = wound_m
                     m.telem.unwind_length_m = float(e["unwind_m"])
                     m.telem.encoder_pulses = int(e["pulses"])
                     m.telem.emu_consumer_diameter_mm = float(
                         e.get("consumer_diameter_mm", 0.0)
                     )
-                    m.telem.encoder_error = not bool(e["ok"])
+                    encoder_ok = bool(e["ok"])
+                    m.telem.encoder_error = not encoder_ok
                     m.telem.magnet_ok = True
                 else:
                     assert enc_thread is not None
                     enc_thread.set_wound_enable(wound_enable)
                     e = enc_thread.snapshot()
-                    m.telem.speed_mpm = float(e.speed_mpm)
-                    m.telem.wound_length_m = float(e.wound_m)
+                    wound_m = float(e.wound_m)
+                    m.telem.wound_length_m = wound_m
                     m.telem.unwind_length_m = float(e.unwind_m)
                     m.telem.encoder_pulses = int(e.pulses)
-                    m.telem.encoder_error = not bool(e.ok)
+                    encoder_ok = bool(e.ok)
+                    m.telem.encoder_error = not encoder_ok
                     m.telem.magnet_ok = bool(e.magnet_ok)
+
+                if encoder_ok:
+                    if prev_wound_length_m is not None:
+                        last_speed_mpm = speed_mpm_from_length_delta(
+                            wound_m - prev_wound_length_m,
+                            ctrl_dt,
+                        )
+                    else:
+                        last_speed_mpm = 0.0
+                    prev_wound_length_m = wound_m
+                m.telem.speed_mpm = last_speed_mpm
 
                 m.update_state(inp)
                 prev_reset_wound = inp.reset_wound_pulse

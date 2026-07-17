@@ -265,24 +265,30 @@ def build_stylesheet() -> str:
         font-size: 12pt;
         font-weight: 600;
     }}
-    QPushButton#pidMethod {{
+    QRadioButton#pidMethod {{
         min-height: 44px;
-        border-radius: 10px;
-        border: 1px solid {t.BORDER};
-        background-color: {t.PANEL};
+        spacing: 14px;
         color: {t.TEXT};
-        font-size: 10pt;
+        font-size: 11pt;
         font-weight: 600;
-        padding: 8px 10px;
-        text-align: left;
+        padding: 6px 4px;
     }}
-    QPushButton#pidMethod:hover {{
-        border-color: {t.ACCENT};
+    QRadioButton#pidMethod::indicator {{
+        width: 26px;
+        height: 26px;
     }}
-    QPushButton#pidMethod:checked {{
-        background-color: rgba(0, 212, 255, 0.15);
-        border-color: {t.BORDER};
-        color: {t.TEXT};
+    QRadioButton#pidMethod::indicator:unchecked {{
+        border: 2px solid {t.BORDER};
+        border-radius: 13px;
+        background-color: {t.PANEL};
+    }}
+    QRadioButton#pidMethod::indicator:checked {{
+        border: 2px solid {t.BORDER};
+        border-radius: 13px;
+        background-color: rgba(0, 212, 255, 0.35);
+    }}
+    QRadioButton#pidMethod:disabled {{
+        color: #5a6a78;
     }}
     QPushButton#settingsGroup:hover {{
         border-color: {t.ACCENT};
