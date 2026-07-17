@@ -127,7 +127,18 @@ python3 -m brakovka_pi
 
 ## Настройки
 
-По умолчанию: `brakovka_pi/settings.json`.
+**`brakovka_pi/settings.json` не хранится в git** — на каждой машине (ПК, Pi) свой файл.
+
+Первый запуск / клон:
+
+```bash
+cp brakovka_pi/settings.json.example brakovka_pi/settings.json
+# отредактируйте port, unit_id, machine под своё железо
+```
+
+Шаблон в репозитории: `brakovka_pi/settings.json.example`.
+
+По умолчанию приложение читает: `brakovka_pi/settings.json`.
 
 - Путь: `BRAKOVKA_SETTINGS=/path/settings.json`
 - Эмуляция: `BRAKOVKA_EMU=1` или `"emulator": true`
@@ -403,18 +414,20 @@ chmod +x deploy/*.sh
 bash deploy/install_desktop_icon.sh
 ```
 
-### Обновление кода (сохранить локальный `settings.json`)
+### Обновление кода на Pi
+
+`settings.json` в git нет — **`git pull` без stash**:
 
 ```bash
 cd ~/rpi_python
-cp brakovka_pi/settings.json /tmp/settings.json.bak
-git stash push -m "pi settings" -- brakovka_pi/settings.json
 git pull origin master
-git stash pop
 ```
 
-При конфликте в `settings.json` после `stash pop` — сверьте с `/tmp/settings.json.bak`
-(`port`, `unit_id`, `machine`, уставки).
+Первый клон (если нет `settings.json`):
+
+```bash
+cp brakovka_pi/settings.json.example brakovka_pi/settings.json
+```
 
 Проверка Modbus после обновления:
 

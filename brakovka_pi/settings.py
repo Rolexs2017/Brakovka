@@ -38,7 +38,9 @@ def load_settings() -> Settings:
     path = settings_path()
 
     if not path.exists():
-        raise FileNotFoundError(f"Settings file not found: {path}")
+        example = path.with_name("settings.json.example")
+        hint = f" Copy {example} to {path} and edit for this machine." if example.exists() else ""
+        raise FileNotFoundError(f"Settings file not found: {path}.{hint}")
 
     data = json.loads(path.read_text(encoding="utf-8"))
 

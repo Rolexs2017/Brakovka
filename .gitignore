@@ -6,3 +6,5 @@ venv/
 *.egg-info/
 git/
 
+# Local runtime config (copy from settings.json.example on each machine)
+brakovka_pi/settings.json
