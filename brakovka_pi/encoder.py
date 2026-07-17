@@ -36,7 +36,6 @@ def speed_mpm_from_length_delta(delta_m: float, dt_s: float) -> float:
 class EncoderTelemetry:
     """Snapshot from encoder thread (speed is computed in the controller loop)."""
 
-    speed_mpm: float = 0.0
     wound_m: float = 0.0
     unwind_m: float = 0.0
     pulses: int = 0
@@ -175,7 +174,6 @@ class Encoder:
 
     def _telem(self, *, ok: bool, magnet_ok: bool = True) -> EncoderTelemetry:
         return EncoderTelemetry(
-            speed_mpm=0.0,
             wound_m=self._length_m(self._wound_pulses),
             unwind_m=self._length_m(self._unwind_pulses),
             pulses=self._wound_pulses,

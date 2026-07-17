@@ -216,7 +216,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
     ),
     _sp(
         "start_diameter_mm",
-        ui_key="start_diameter_mm",
         lo=50.0,
         hi=3000.0,
         persist=False,

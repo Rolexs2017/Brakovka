@@ -20,10 +20,6 @@ def _parse_rs485_de(raw: object) -> Optional[int]:
     return pin if pin > 0 else None
 
 
-def _parse_pid_tune_method(raw: object) -> str:
-    return parse_pid_tune_method(raw)
-
-
 def resolve_emulator(emu_from_file: bool) -> bool:
     """True on non-Linux hosts, when settings/env request emulation."""
     return (
@@ -286,7 +282,7 @@ def load_runtime_config():
         pid_kp=_machine_clamp("pid_kp", float(machine_raw.get("pid_kp", 5.0))),
         pid_ti=_machine_clamp("pid_ti", float(machine_raw.get("pid_ti", 2.0))),
         pid_kd=_machine_clamp("pid_kd", float(machine_raw.get("pid_kd", 0.0))),
-        pid_tune_method=_parse_pid_tune_method(machine_raw.get("pid_tune_method", "relay")),
+        pid_tune_method=parse_pid_tune_method(machine_raw.get("pid_tune_method", "relay")),
         mpm_per_hz=_machine_clamp("mpm_per_hz", float(machine_raw.get("mpm_per_hz", 1.0))),
         tension_brake_min_pct=_machine_clamp(
             "tension_brake_min_pct", float(machine_raw.get("tension_brake_min_pct", 2.0))

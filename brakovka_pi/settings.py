@@ -14,7 +14,6 @@ class Settings:
     serial: dict[str, Any]
     opcua: dict[str, Any]
     timing: dict[str, Any]
-    vfd: dict[str, Any]
     machine: dict[str, Any]
     emu: dict[str, Any]
     ui: dict[str, Any]
@@ -47,7 +46,7 @@ def load_settings() -> Settings:
     if os.getenv("BRAKOVKA_EMU", "0") == "1":
         data["emulator"] = True
 
-    for k in ("gpio", "serial", "opcua", "timing", "vfd", "machine", "emu", "ui"):
+    for k in ("gpio", "serial", "opcua", "timing", "machine", "emu", "ui"):
         data.setdefault(k, {})
 
     return Settings(
@@ -56,7 +55,6 @@ def load_settings() -> Settings:
         serial=dict(data["serial"]),
         opcua=dict(data["opcua"]),
         timing=dict(data["timing"]),
-        vfd=dict(data["vfd"]),
         machine=dict(data["machine"]),
         emu=dict(data["emu"]),
         ui=dict(data["ui"]),

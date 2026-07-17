@@ -31,7 +31,7 @@ def _scaled_logo(filename: str, height: int = LOGO_DISPLAY_HEIGHT) -> QPixmap:
     )
 
 
-def make_logo_label(filename: str, height: int = LOGO_DISPLAY_HEIGHT) -> QLabel:
+def _make_logo_label(filename: str, height: int = LOGO_DISPLAY_HEIGHT) -> QLabel:
     label = QLabel()
     label.setObjectName("logoMark")
     pix = _scaled_logo(filename, height)
@@ -53,9 +53,9 @@ def make_logo_header(parent: QWidget | None = None) -> QWidget:
     row = QHBoxLayout(bar)
     row.setContentsMargins(16, 8, 16, 8)
     row.setSpacing(12)
-    row.addWidget(make_logo_label("IVCORE.png"), 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    row.addWidget(_make_logo_label("IVCORE.png"), 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     row.addStretch(1)
-    row.addWidget(make_logo_label("logo.png"), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    row.addWidget(_make_logo_label("logo.png"), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     return bar
 
 

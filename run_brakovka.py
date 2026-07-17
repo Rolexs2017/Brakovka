@@ -14,7 +14,8 @@ import os
 import sys
 import threading
 
-from brakovka_pi.controller import run_controller, setup_logging
+from brakovka_pi.controller import run_controller
+from brakovka_pi.logutil import setup_logging
 
 
 def _run_controller_thread(

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from .controller import main, setup_logging
+from .controller import main
+from .logutil import setup_logging
 
 __all__ = ["main", "setup_logging"]
 

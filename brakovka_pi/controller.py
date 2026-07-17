@@ -596,3 +596,6 @@ async def run_controller(
 async def main() -> None:
     setup_logging()
     await run_controller()
+
+
+__all__ = ["main", "run_controller"]
