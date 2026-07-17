@@ -14,8 +14,8 @@
     "timeout_s": 3,
     "retries": 3,
     "unit_id": 1,
-    "de_delay_before_tx_s": 0.002,
-    "de_turnaround_s": 0.003,
+    "de_delay_before_tx_s": 0.005,
+    "de_turnaround_s": 0.010,
     "rs485_active_high": true,
     "reconnect_period_s": 2.0,
     "fails_before_reconnect": 2

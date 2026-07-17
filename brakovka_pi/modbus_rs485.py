@@ -13,7 +13,7 @@ from .config import RS485_RTS0_GPIO, SerialConfig, VfdConfig
 log = logging.getLogger(__name__)
 
 # Software RTS0 toggle (GPIO17 ALT3). Kernel TIOCSRS485 on PL011 often leaves RTS stuck HIGH.
-DE_CONTROL_VERSION = "v7-uart-rts0-soft"
+DE_CONTROL_VERSION = "v8-uart-rts0-echo-flush"
 
 
 @dataclass
@@ -129,6 +129,34 @@ class Rs485Vfd:
         except Exception as exc:
             log.debug("RTS set failed: %s", exc)
 
+    def _flush_rx(self) -> None:
+        ser = self._get_pyserial()
+        if ser is None:
+            return
+        try:
+            ser.reset_input_buffer()
+        except Exception:
+            pass
+
+    def _discard_rx_noise(self, max_bytes: int = 64) -> None:
+        """Drop leftover TX echo / bus garbage so pymodbus does not CRC-fail."""
+        ser = self._get_pyserial()
+        if ser is None or max_bytes <= 0:
+            return
+        try:
+            n = int(getattr(ser, "in_waiting", 0) or 0)
+            if n <= 0:
+                return
+            junk = ser.read(min(n, max_bytes))
+            if junk:
+                log.debug(
+                    "RS485 discarded %s RX byte(s) before slave frame: %s",
+                    len(junk),
+                    junk.hex(" "),
+                )
+        except Exception:
+            pass
+
     def _rx_mode(self) -> None:
         """Idle / receive: RTS at RX level (must not stay HIGH if HIGH=TX)."""
         self._set_rts(self._rts_rx_level())
@@ -149,20 +177,29 @@ class Rs485Vfd:
         baud = max(1.0, float(self._serial.baudrate))
         return (max(0, int(nbytes)) * 10.0) / baud
 
+    def _switch_to_rx_after_tx(self, nbytes: int) -> None:
+        """Drop DE to RX, then discard local TX echo (if any) before slave reply."""
+        self._rx_mode()
+        time.sleep(0.001)
+        # Only purge up to our TX length — do not eat the slave response.
+        self._discard_rx_noise(max(0, int(nbytes)))
+
     def _arm_rx_after_tx(self, nbytes: int) -> None:
         self._cancel_de_timer()
         delay = (
             self._frame_time_s(nbytes)
             + float(self._serial.de_turnaround_s)
-            + 0.015
+            + 0.002
         )
-        timer = threading.Timer(delay, self._rx_mode)
+        timer = threading.Timer(delay, self._switch_to_rx_after_tx, args=(nbytes,))
         timer.daemon = True
         self._de_timer = timer
         timer.start()
 
     def _trace_packet(self, sending: bool, data: bytes) -> bytes:
         if sending and data:
+            # Clear stale RX before master frame (prevents CRC on leftover bytes).
+            self._flush_rx()
             self._tx_mode()
             before = float(self._serial.de_delay_before_tx_s)
             if before > 0:

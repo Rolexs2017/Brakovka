@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Raw Modbus RTU with soft UART RTS0 (GPIO17) — diagnoses RX path.
+# Raw Modbus RTU with soft UART RTS0 (GPIO17) — diagnoses RX / CRC / echo.
 set -euo pipefail
 VENV_PATH="${VENV_PATH:-/home/rolexs/brk}"
 PYTHON="${PYTHON:-$VENV_PATH/bin/python}"
@@ -46,6 +46,13 @@ def build_read_holding(unit_id: int, address: int, count: int = 1) -> bytes:
     return pdu + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
 
 
+def check_crc(frame: bytes) -> bool:
+    if len(frame) < 4:
+        return False
+    got = frame[-2] | (frame[-1] << 8)
+    return modbus_crc(frame[:-2]) == got
+
+
 _, _, sc, vc, *_ = load_runtime_config()
 invert = os.getenv("INVERT_RSE", "0") == "1"
 active_high = False if invert else bool(sc.rs485_active_high)
@@ -70,6 +77,7 @@ except Exception:
     pass
 
 ser.rts = rx_level
+ser.reset_input_buffer()
 print(f"idle RTS={int(ser.rts)} (expect RX={int(rx_level)})")
 
 req = build_read_holding(int(sc.unit_id), reg, 1)
@@ -82,19 +90,30 @@ ser.write(req)
 ser.flush()
 time.sleep(len(req) * 10 / float(sc.baudrate) + after_s)
 ser.rts = rx_level
+# Discard possible TX echo (main CRC cause on half-duplex)
+time.sleep(0.002)
+echo_n = ser.in_waiting
+if echo_n:
+    echo = ser.read(echo_n)
+    print(f"echo/garbage discarded ({len(echo)}): {echo.hex(' ')}")
+    if echo == req:
+        print("NOTE: full TX echo on RX — RE may be always on; discard is required")
 print(f"after TX RTS={int(ser.rts)} (must be RX={int(rx_level)})")
 time.sleep(0.05)
 
 rx = ser.read(64)
 print(f"RX ({len(rx)} bytes): {rx.hex(' ') if rx else '(empty)'}")
 if not rx:
-    print("Нет RX. Проверьте:")
-    print(f"  1) DE -> GPIO{RS485_RTS0_GPIO}, pinctrl get 17 → RTS0")
-    print("  2) после TX RTS должен быть 0 (если active_high TX)")
-    print("  3) INVERT_RSE=1 bash deploy/check_modbus_raw.sh")
-    print("  4) A/B, GND, один мастер")
+    print("Нет RX. Проверьте DE/RTS0, A/B, GND, baud/addr")
+elif check_crc(rx):
+    print("OK: CRC valid")
+    if len(rx) >= 5 and rx[1] == 0x03:
+        print(f"  data={rx[3:-2].hex(' ')}")
 else:
-    print("OK: ответ от ПЧ получен")
+    print("CRC ERROR on received frame")
+    if rx.startswith(req[:1]) or req[:4] in rx:
+        print("  Looks like TX mixed with RX — increase de_turnaround_s or check echo")
+    print("  Try: INVERT_RSE=1  or  larger de_turnaround_s in settings.json")
 
 ser.rts = rx_level
 print(f"final RTS={int(ser.rts)}")
