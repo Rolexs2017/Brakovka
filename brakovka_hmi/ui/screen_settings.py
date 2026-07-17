@@ -107,6 +107,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._btn_autotune.clicked.connect(self._start_autotune)
         self._btn_abort_tune.clicked.connect(self._abort_autotune)
         self._btn_quit.clicked.connect(self.quit_requested.emit)
+        self._btn_clear_logs.clicked.connect(self._clear_logs)
 
         self._last_pulses = 0
         self._encoder_invert = False
@@ -261,7 +262,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
             0,
         )
         grid.addWidget(
-            self._group_button("Сервис", "Адрес ПЧ, эмуляция, выход", PAGE_SERVICE),
+            self._group_button("Сервис", "Адрес ПЧ, эмуляция, журнал, выход", PAGE_SERVICE),
             1,
             1,
         )
@@ -471,6 +472,22 @@ class SettingsScreen(EditableFormMixin, QWidget):
         emu_row.addWidget(self._btn_emu)
         emu_row.addWidget(self._emu_hint, stretch=1)
         lay.addLayout(emu_row)
+
+        clear_row = QHBoxLayout()
+        clear_row.setSpacing(12)
+        self._btn_clear_logs = QPushButton("Очистить статистику")
+        self._btn_clear_logs.setObjectName("cmdStop")
+        self._btn_clear_logs.setMinimumWidth(220)
+        self._btn_clear_logs.setMinimumHeight(44)
+        self._clear_logs_hint = QLabel(
+            "Обнуляет файлы журнала (brakovka_info.log / brakovka_error.log) "
+            "и удаляет ротированные копии. Экран «Журнал» станет пустым."
+        )
+        self._clear_logs_hint.setWordWrap(True)
+        self._clear_logs_hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        clear_row.addWidget(self._btn_clear_logs)
+        clear_row.addWidget(self._clear_logs_hint, stretch=1)
+        lay.addLayout(clear_row)
 
         self._btn_quit = QPushButton("Закрыть приложение")
         self._btn_quit.setObjectName("cmdStop")
@@ -904,6 +921,35 @@ class SettingsScreen(EditableFormMixin, QWidget):
             play_error()
             QMessageBox.warning(self, "Адрес Modbus ПЧ", "Не удалось сохранить настройку.")
 
+    def _clear_logs(self) -> None:
+        from brakovka_pi.logutil import clear_log_files, current_log_dir
+
+        reply = QMessageBox.question(
+            self,
+            "Очистить статистику",
+            "Обнулить файлы журнала (info/error) и удалить ротированные копии?\n\n"
+            f"Каталог: {current_log_dir()}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        touched, errors = clear_log_files()
+        if errors:
+            play_error()
+            QMessageBox.warning(
+                self,
+                "Очистить статистику",
+                "Очистка выполнена с ошибками:\n" + "\n".join(errors),
+            )
+            return
+        play_ok()
+        QMessageBox.information(
+            self,
+            "Очистить статистику",
+            f"Журнал очищен ({touched} файл(ов)).",
+        )
+
     def _toggle_emulator(self) -> None:
         new_value = not self._emu_desired
         action = "включить" if new_value else "выключить"
@@ -960,6 +1006,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._btn_save.setEnabled(enabled)
         self._btn_emu.setEnabled(enabled)
         self._btn_vfd_addr_save.setEnabled(enabled)
+        self._btn_clear_logs.setEnabled(enabled)
         self._btn_invert.setEnabled(enabled)
         if not enabled:
             self._btn_autotune.setEnabled(False)

@@ -107,6 +107,38 @@ def current_log_dir() -> Path:
     return Path(getattr(setup_logging, "_log_dir", default_log_dir()))
 
 
+def clear_log_files(log_dir: Path | None = None) -> tuple[int, list[str]]:
+    """
+    Clear journal log files used by HMI.
+
+    Truncates active ``brakovka_info.log`` / ``brakovka_error.log`` and deletes
+    rotated backups (``.1`` …). Returns (files_touched, error messages).
+    """
+    directory = log_dir or current_log_dir()
+    if not directory.is_dir():
+        return 0, [f"Каталог логов не найден: {directory}"]
+
+    touched = 0
+    errors: list[str] = []
+    active = {INFO_LOG_NAME, ERROR_LOG_NAME}
+
+    for path in sorted(directory.glob("brakovka_*.log*")):
+        if not path.is_file():
+            continue
+        try:
+            if path.name in active:
+                path.write_text("", encoding="utf-8")
+            else:
+                path.unlink(missing_ok=True)
+            touched += 1
+        except OSError as exc:
+            errors.append(f"{path.name}: {exc}")
+
+    if touched and not errors:
+        logging.getLogger(__name__).info("Journal logs cleared (%s files)", touched)
+    return touched, errors
+
+
 @dataclass(frozen=True)
 class JournalEntry:
     timestamp: str
