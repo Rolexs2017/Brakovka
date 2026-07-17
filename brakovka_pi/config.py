@@ -19,6 +19,7 @@ def _parse_rs485_de(raw: object) -> Optional[int]:
     return pin if pin > 0 else None
 
 
+def resolve_emulator(emu_from_file: bool) -> bool:
     """True on non-Linux hosts, when settings/env request emulation."""
     return (
         (not sys.platform.startswith("linux"))

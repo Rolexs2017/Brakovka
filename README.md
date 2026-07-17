@@ -374,3 +374,37 @@ bash deploy/check_modbus.sh
 
 Пин DE в `settings.json`: `serial.rs485_de` — число GPIO или `null` для USB.
 
+## Raspberry Pi: ярлык и обновление с ПК
+
+Шара ПК: `//ROLEXS-DEV/Developments` → `/mnt/pc-git` (см. `/etc/fstab`).
+
+### Ярлык
+
+```bash
+cd ~/rpi_python
+sed -i 's/\r$//' deploy/*.sh deploy/*.desktop
+chmod +x deploy/*.sh
+bash deploy/install_desktop_icon.sh
+```
+
+### Обновление кода (сохранить локальный `settings.json`)
+
+```bash
+cd ~/rpi_python
+cp brakovka_pi/settings.json /tmp/settings.json.bak
+git stash push -m "pi settings" -- brakovka_pi/settings.json
+git pull origin master
+git stash pop
+```
+
+При конфликте в `settings.json` после `stash pop` — сверьте с `/tmp/settings.json.bak`
+(`port`, `unit_id`, `machine`, уставки).
+
+Проверка Modbus после обновления:
+
+```bash
+pkill -f run_brakovka.py || true
+bash deploy/check_modbus.sh
+bash deploy/run_brakovka.sh
+```
+
