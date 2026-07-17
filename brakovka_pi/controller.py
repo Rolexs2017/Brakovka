@@ -380,8 +380,19 @@ async def run_controller(
                     if autotuner is not None:
                         autotuner = None
                     sp_mpm = m.update_speed_ramp(ctrl_dt)
-                    freq_cmd_hz = m.pid_speed_to_hz(sp_mpm, actual_mpm, ctrl_dt)
+                    raw_freq_cmd_hz = m.pid_speed_to_hz(sp_mpm, actual_mpm, ctrl_dt)
                     run_cmd = (not stopping) and sp_mpm > 0.01 and inp.estop_ok
+                    if not run_cmd or stopping or entered_stopping:
+                        freq_cmd_hz = 0.0
+                    else:
+                        tau_s = max(0.0, float(m.params.vfd_cmd_filter_tau_s))
+                        if tau_s <= 1e-6:
+                            freq_cmd_hz = raw_freq_cmd_hz
+                        else:
+                            alpha = ctrl_dt / (tau_s + ctrl_dt)
+                            freq_cmd_hz = last_freq_cmd + alpha * (
+                                raw_freq_cmd_hz - last_freq_cmd
+                            )
 
                 last_freq_cmd = freq_cmd_hz
                 m.telem.vfd_freq_cmd_hz = freq_cmd_hz

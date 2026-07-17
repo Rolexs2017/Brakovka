@@ -42,6 +42,8 @@ class MachineParams:
 
     encoder_spike_m: float = 2.0
     encoder_speed_filter_n: int = 5
+    # 1st-order low-pass for VFD command frequency (0 = disabled).
+    vfd_cmd_filter_tau_s: float = 0.0
     encoder_invert: bool = False
 
     pid_kp: float = 5.0
