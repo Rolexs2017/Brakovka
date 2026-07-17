@@ -35,41 +35,27 @@ class EncoderTelemetry:
     magnet_ok: bool = True
 
 
-class SpeedMedianFilter:
-    """Median filter over the last N samples (odd window). N<=1 disables."""
+class SpeedMovingAverage:
+    """Arithmetic mean over the last N speed samples (m/min)."""
 
-    def __init__(self, window: int = 5) -> None:
-        self._window = 1
-        self._buf: deque[float] = deque(maxlen=1)
+    def __init__(self, window: int = 10) -> None:
+        self._window = max(1, int(window))
+        self._buf: deque[float] = deque(maxlen=self._window)
         self.value_mpm = 0.0
-        self.set_window(window)
-
-    def set_window(self, window: int) -> None:
-        n = max(1, int(window))
-        if n % 2 == 0:
-            n += 1
-        prev = list(self._buf)
-        self._window = n
-        self._buf = deque(prev[-n:], maxlen=n)
-        if self._buf:
-            s = sorted(self._buf)
-            self.value_mpm = s[len(s) // 2]
 
     def reset(self, value_mpm: float = 0.0) -> None:
         self._buf.clear()
         self.value_mpm = max(0.0, float(value_mpm))
 
-    def update(self, raw_mpm: float, *, hold: bool = False) -> float:
-        if hold:
-            return self.value_mpm
+    def update(self, raw_mpm: float) -> float:
         raw = max(0.0, float(raw_mpm))
-        if self._window <= 1:
-            self.value_mpm = raw
-            return self.value_mpm
         self._buf.append(raw)
-        s = sorted(self._buf)
-        self.value_mpm = s[len(s) // 2]
+        self.value_mpm = sum(self._buf) / len(self._buf)
         return self.value_mpm
+
+
+# Fixed window before speed PID / autotune (controller).
+PID_REGULATOR_SPEED_AVG_N = 10
 
 
 class Encoder:
@@ -77,7 +63,6 @@ class Encoder:
         self,
         roll_diameter_m: float,
         spike_threshold_m: float = 2.0,
-        speed_filter_n: int = 5,
         max_speed_mpm: float = 300.0,
         invert: bool = False,
     ) -> None:
@@ -89,15 +74,12 @@ class Encoder:
         self._spike_m = spike_threshold_m
         self._max_speed_mpm = max(1.0, float(max_speed_mpm))
         self._invert = bool(invert)
-        self._speed_filt = SpeedMedianFilter(speed_filter_n)
+        self._last_speed_mpm = 0.0
 
     def set_roll_diameter_m(self, roll_diameter_m: float) -> None:
         if roll_diameter_m <= 0:
             return
         self._roll_diameter_m = roll_diameter_m
-
-    def set_speed_filter_n(self, window: int) -> None:
-        self._speed_filt.set_window(window)
 
     def set_max_speed_mpm(self, max_speed_mpm: float) -> None:
         self._max_speed_mpm = max(1.0, float(max_speed_mpm))
@@ -147,20 +129,20 @@ class Encoder:
         wound_enable: учитывать метраж потребителя (обычно True — ролик меряет факт)
 
         Метраж = накопительные импульсы × (π·D / 4096).
-        Скорость — медианный фильтр по |Δм|/dt.
+        Скорость — мгновенная |Δм|/dt (без сглаживания на энкодере).
         Знак импульсов — физический поворот AS5600 (см. encoder_invert).
 
         ok=False только при сбое чтения I2C. Отсев спайков не считается аварией
         (иначе лампа «Ошибка энкодера» мигает при каждом резком Δ).
         """
         if dt_s <= 0:
-            return self._telem(speed_mpm=self._speed_filt.value_mpm, ok=True)
+            return self._telem(speed_mpm=self._last_speed_mpm, ok=True)
 
         try:
             s = self._as.read()
         except Exception:
             return self._telem(
-                speed_mpm=self._speed_filt.update(0.0, hold=True),
+                speed_mpm=self._last_speed_mpm,
                 ok=False,
                 magnet_ok=False,
             )
@@ -169,7 +151,7 @@ class Encoder:
         raw = int(s.raw) & 0x0FFF
         if self._prev_raw is None:
             self._prev_raw = raw
-            self._speed_filt.reset(0.0)
+            self._last_speed_mpm = 0.0
             return self._telem(speed_mpm=0.0, ok=True, magnet_ok=magnet_ok)
 
         delta = raw - self._prev_raw
@@ -190,13 +172,13 @@ class Encoder:
         if fabs(delta_m) > self._spike_m or abs(signed) > max_counts:
             signed = 0
             delta_m = 0.0
-            speed_mpm = self._speed_filt.update(0.0, hold=True)
+            speed_mpm = self._last_speed_mpm
         else:
             self._unwind_pulses = max(0, self._unwind_pulses + signed)
             if wound_enable:
                 self._wound_pulses = max(0, self._wound_pulses + signed)
-            raw_speed = (fabs(delta_m) / dt_s) * 60.0
-            speed_mpm = self._speed_filt.update(raw_speed)
+            speed_mpm = (fabs(delta_m) / dt_s) * 60.0
+            self._last_speed_mpm = speed_mpm
 
         return self._telem(speed_mpm=speed_mpm, ok=True, magnet_ok=magnet_ok)
 
@@ -254,10 +236,6 @@ class ThreadedEncoder:
     def set_roll_diameter_m(self, roll_diameter_m: float) -> None:
         with self._lock:
             self._enc.set_roll_diameter_m(roll_diameter_m)
-
-    def set_speed_filter_n(self, window: int) -> None:
-        with self._lock:
-            self._enc.set_speed_filter_n(window)
 
     def set_max_speed_mpm(self, max_speed_mpm: float) -> None:
         with self._lock:

@@ -68,8 +68,6 @@
     "brake_max_pressure_pct": 100.0,
     "max_ramp_speed_mpm": 300.0,
     "encoder_spike_m": 2.0,
-    "encoder_speed_filter_n": 5,
-    "vfd_cmd_filter_tau_s": 0.2,
     "encoder_invert": false,
     "emu_mpm_per_hz": 1.0,
     "emu_motor_rpm_per_hz": 60.0

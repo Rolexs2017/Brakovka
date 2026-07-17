@@ -3,7 +3,6 @@ from __future__ import annotations
 from math import pi
 
 from .modbus_rs485 import VfdCommand
-from .encoder import SpeedMedianFilter
 from .roll_geometry import wound_diameter_m
 
 
@@ -59,7 +58,7 @@ class EmulatedVfd:
 class SimEncoder:
     """
     Виртуальный энкодер: Hz → rpm → линейная скорость с учётом диаметра потребителя,
-    инерция 1-го порядка + медианный фильтр (как на железе).
+    инерция 1-го порядка (без сглаживания скорости на выходе).
     """
 
     def __init__(
@@ -70,7 +69,6 @@ class SimEncoder:
         consumer_core_diameter_m: float = 0.076,
         thickness_m: float = 0.0003,
         roll_diameter_m: float = 0.08,
-        speed_filter_n: int = 5,
     ) -> None:
         self.tau_s = max(0.01, float(tau_s))
         # Allow ratios < 1 (e.g. 0.2): motor rpm / gear → roller rpm.
@@ -83,11 +81,7 @@ class SimEncoder:
         self._speed_mpm = 0.0
         self._unwind_pulses = 0
         self._wound_pulses = 0
-        self._speed_filt = SpeedMedianFilter(speed_filter_n)
         self._consumer_diameter_m = self.consumer_core_diameter_m
-
-    def set_speed_filter_n(self, window: int) -> None:
-        self._speed_filt.set_window(window)
 
     def _meters_per_count(self) -> float:
         return (pi * self.roll_diameter_m) / 4096.0
@@ -130,7 +124,7 @@ class SimEncoder:
         )
 
         return {
-            "speed_mpm": self._speed_filt.update(self._speed_mpm),
+            "speed_mpm": self._speed_mpm,
             "wound_m": wound_m,
             "unwind_m": unwind_m,
             "pulses": self._wound_pulses,

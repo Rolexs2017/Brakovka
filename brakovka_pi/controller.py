@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from .brake_pwm import BrakePwm
 from .commands import merge_command_dicts
 from .config import load_runtime_config, resolve_emulator
-from .encoder import Encoder, ThreadedEncoder
+from .encoder import Encoder, PID_REGULATOR_SPEED_AVG_N, SpeedMovingAverage, ThreadedEncoder
 from .emulation import EmulatedVfd, SimEncoder
 from .gpio_io import GpioInputs
 from .logutil import setup_logging
@@ -185,14 +185,12 @@ async def run_controller(
             consumer_core_diameter_m=m.params.core_diameter_m,
             thickness_m=m.params.material_thickness_m,
             roll_diameter_m=m.params.roll_diameter_m,
-            speed_filter_n=m.params.encoder_speed_filter_n,
         )
         encoder = enc_emu
     else:
         enc_hw = Encoder(
             roll_diameter_m=m.params.roll_diameter_m,
             spike_threshold_m=m.params.encoder_spike_m,
-            speed_filter_n=m.params.encoder_speed_filter_n,
             max_speed_mpm=m.params.max_ramp_speed_mpm,
             invert=m.params.encoder_invert,
         )
@@ -217,6 +215,7 @@ async def run_controller(
         last_task_ok_t = monotonic()
         watchdog_limit_s = float(timing_cfg.watchdog_limit_s)
         autotuner: PidAutotuner | StepResponseAutotuner | None = None
+        pid_speed_avg = SpeedMovingAverage(PID_REGULATOR_SPEED_AVG_N)
 
         p_task = _Periodic(timing_cfg.task_period_s)
         p_opc_poll = _Periodic(timing_cfg.opcua_poll_period_s)
@@ -247,7 +246,6 @@ async def run_controller(
                 await opc.clear_one_shots()
                 if enc_thread is not None:
                     enc_thread.set_roll_diameter_m(m.params.roll_diameter_m)
-                    enc_thread.set_speed_filter_n(m.params.encoder_speed_filter_n)
                     enc_thread.set_max_speed_mpm(m.params.max_ramp_speed_mpm)
                     enc_thread.set_invert(m.params.encoder_invert)
                 if enc_emu is not None:
@@ -256,7 +254,6 @@ async def run_controller(
                     enc_emu.motor_rpm_per_hz = max(
                         0.01, float(m.params.emu_motor_rpm_per_hz)
                     )
-                    enc_emu.set_speed_filter_n(m.params.encoder_speed_filter_n)
 
             inp_gpio = gpio.read()
             if hmi_bridge is not None:
@@ -289,6 +286,7 @@ async def run_controller(
                     encoder.reset_unwind()
                     m.apply_new_unwind_roll()
                     m.reset_pid()
+                    pid_speed_avg.reset(0.0)
                     machine_log.info(
                         "Reset roll: length=%.0f m diameter=%.0f mm remaining=%.1f m",
                         m.params.unwind_roll_length_m,
@@ -298,6 +296,7 @@ async def run_controller(
                 if inp.reset_wound_pulse and not prev_reset_wound:
                     encoder.reset_wound()
                     m.reset_pid()
+                    pid_speed_avg.reset(0.0)
                     machine_log.info("Reset wound length")
 
                 if inp.start_pulse:
@@ -359,7 +358,7 @@ async def run_controller(
                     machine_log.info("Encoder recovered")
                 prev_encoder_error = m.telem.encoder_error
 
-                actual_mpm = m.telem.speed_mpm
+                actual_mpm = pid_speed_avg.update(m.telem.speed_mpm)
                 stopping = state == MachineState.STOPPING
 
                 # --- PID autotune or normal ramp+PID ---
@@ -420,14 +419,7 @@ async def run_controller(
                     if not run_cmd or stopping or entered_stopping:
                         freq_cmd_hz = 0.0
                     else:
-                        tau_s = max(0.0, float(m.params.vfd_cmd_filter_tau_s))
-                        if tau_s <= 1e-6:
-                            freq_cmd_hz = raw_freq_cmd_hz
-                        else:
-                            alpha = ctrl_dt / (tau_s + ctrl_dt)
-                            freq_cmd_hz = last_freq_cmd + alpha * (
-                                raw_freq_cmd_hz - last_freq_cmd
-                            )
+                        freq_cmd_hz = raw_freq_cmd_hz
 
                 last_freq_cmd = freq_cmd_hz
                 m.telem.vfd_freq_cmd_hz = freq_cmd_hz
