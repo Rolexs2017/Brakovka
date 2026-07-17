@@ -93,9 +93,9 @@ class VfdConfig:
     reg_fault: int = 0x2100
     reg_freq_out: int = 0x2103
     freq_scale: int = 100
-    cmd_forward: int = 18
-    cmd_reverse: int = 34
-    cmd_stop: int = 1
+    cmd_forward: int = 0x0012
+    cmd_reverse: int = 0x0022
+    cmd_stop: int = 0x0001
     profile: str = "delta_cp2000"
 
 
