@@ -52,7 +52,8 @@ print("settings emulator flag:", emu)
 print(
     f"serial: port={serial_cfg.port} baud={serial_cfg.baudrate} "
     f"parity={serial_cfg.parity} stop={serial_cfg.stopbits} "
-    f"unit_id={serial_cfg.unit_id} DE=GPIO{serial_cfg.rs485_de}"
+    f"unit_id={serial_cfg.unit_id} de_mode={serial_cfg.de_mode} "
+    f"DE=GPIO{serial_cfg.rs485_de}"
 )
 print(
     f"vfd regs: profile={vfd_cfg.profile} cmd={vfd_cfg.reg_cmd} freq={vfd_cfg.reg_freq} "
@@ -93,16 +94,20 @@ async def main() -> int:
         )
         return 5
 
-    print(f"\nDE pin: ok={de_ok} error={de_err or '(none)'}")
+    print(f"\nDE: mode={getattr(vfd, 'de_mode', '?')} ok={de_ok} error={de_err or '(none)'}")
     if not de_ok:
         print("CRITICAL: DE/RE not driven — half-duplex usually cannot receive.")
+        if getattr(serial_cfg, "de_mode", "") in ("uart_rts", "rts", "rts0"):
+            print("  For uart_rts: ensure gpio=17=a3 in config.txt and DE wired to GPIO17.")
 
-    if de_ok:
+    if de_ok and getattr(vfd, "de_mode", "") == "gpio":
         print("Pulsing DE GPIO high 0.3s ...")
         vfd._tx_mode()
         time.sleep(0.3)
         vfd._rx_mode()
         print("DE back to RX (low)")
+    elif de_ok:
+        print("DE via UART RTS0 (auto during TX)")
 
     print("\n1) connect ...")
     await vfd.connect()

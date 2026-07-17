@@ -5,7 +5,7 @@
 - Управление:
   - **Кнопки**: GPIO `23, 24, 25, 8, 7` (активный LOW, pull-up)
   - **Частотный преобразователь намотки**: **RS485 Modbus RTU** через `/dev/serial0`
-    - `TX=GPIO14`, `RX=GPIO15`, `DE/RE=GPIO16`
+    - `TX=GPIO14`, `RX=GPIO15`, `DE/RE=GPIO17` (**UART0 RTS0**)
   - **PWM тормоз размотки**: GPIO `13`
 - Взаимодействие с HMI/SCADA: **OPC‑UA server** (DWIN отсутствует)
 
@@ -33,6 +33,15 @@ ls -l /dev/serial0
 enable_uart=1
 dtparam=uart0=on
 dtoverlay=disable-bt
+gpio=17=a3
+```
+
+`gpio=17=a3` включает **RTS0** на GPIO17 для DE/RE преобразователя RS485.
+Проверка после reboot:
+
+```bash
+pinctrl get 17
+# ожидается: ... func=RTS0
 ```
 
 Затем `sudo reboot`. Mini-UART на 115200 часто даёт «connected, но нет ответа» на Modbus.
@@ -317,5 +326,11 @@ PID рассчитывает **частоту для частотника в Hz*
 
 Кнопки ожидаются как **активный LOW** (подтяжка вверх).
 
-`GPIO16` управляет направлением RS485 (DE/RE): `1` → передача, `0` → приём.
+**RS485 DE/RE** по умолчанию — **UART0 RTS0 на GPIO17** (`serial.de_mode=uart_rts` в `settings.json`).
+Ядро/pyserial автоматически поднимает RTS на время TX и опускает для RX
+(`serial.rs485.RS485Settings`). Проводка: DI←GPIO14, RO→GPIO15, RSE←GPIO17.
+
+Запасной режим: `"de_mode": "gpio"` — программный выход на `rs485_de` (без RTS0).
+
+В `config.txt` обязательно: `gpio=17=a3` (иначе GPIO17 не RTS0).
 
