@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Raw Modbus RTU with soft UART RTS0 (GPIO17) — diagnoses RX / CRC / echo.
+# Raw Modbus RTU with hardware UART RTS0 (GPIO17 / RS485Settings).
 set -euo pipefail
 VENV_PATH="${VENV_PATH:-/home/rolexs/brk}"
 PYTHON="${PYTHON:-$VENV_PATH/bin/python}"
@@ -15,6 +15,7 @@ import time
 sys.path.insert(0, ".")
 
 import serial
+from serial.rs485 import RS485Settings
 
 from brakovka_pi.config import RS485_RTS0_GPIO, load_runtime_config
 
@@ -56,8 +57,6 @@ def check_crc(frame: bytes) -> bool:
 _, _, sc, vc, *_ = load_runtime_config()
 invert = os.getenv("INVERT_RSE", "0") == "1"
 active_high = False if invert else bool(sc.rs485_active_high)
-tx_level = active_high
-rx_level = not active_high
 before_s = float(sc.de_delay_before_tx_s)
 after_s = float(sc.de_turnaround_s)
 reg = int(vc.reg_status)
@@ -65,57 +64,57 @@ reg = int(vc.reg_status)
 print(f"port={sc.port} baud={sc.baudrate} unit={sc.unit_id}")
 print(f"read reg=0x{reg:04X} ({reg}) profile={vc.profile}")
 print(
-    f"DE=UART RTS0 soft GPIO{RS485_RTS0_GPIO} "
-    f"tx={int(tx_level)} rx={int(rx_level)} (INVERT_RSE={invert})"
+    f"DE=UART RTS0 HARDWARE GPIO{RS485_RTS0_GPIO} "
+    f"active_high={active_high} (INVERT_RSE={invert})"
 )
 
 ser = serial.Serial(sc.port, sc.baudrate, bytesize=8, parity="N", stopbits=1, timeout=1.0)
 ser.rtscts = False
 try:
-    ser.rs485_mode = None
+    ser.rs485_mode = RS485Settings(
+        rts_level_for_tx=active_high,
+        rts_level_for_rx=not active_high,
+        loopback=False,
+        delay_before_tx=before_s if before_s > 0 else None,
+        delay_before_rx=after_s if after_s > 0 else None,
+    )
+    print("hardware rs485_mode ON (kernel toggles RTS0)")
+except Exception as exc:
+    print(f"FAIL: rs485_mode: {type(exc).__name__}: {exc}")
+    print("  Check: gpio=17=a3 in /boot/firmware/config.txt, then reboot")
+    ser.close()
+    raise SystemExit(2)
+
+try:
+    ser.rts = not active_high
 except Exception:
     pass
-
-ser.rts = rx_level
-ser.reset_input_buffer()
-print(f"idle RTS={int(ser.rts)} (expect RX={int(rx_level)})")
+print(f"idle RTS={int(bool(ser.rts))} (expect RX={int(not active_high)})")
 
 req = build_read_holding(int(sc.unit_id), reg, 1)
 print(f"TX {req.hex(' ')}")
 
 ser.reset_input_buffer()
-ser.rts = tx_level
-time.sleep(before_s)
 ser.write(req)
 ser.flush()
-time.sleep(len(req) * 10 / float(sc.baudrate) + after_s)
-ser.rts = rx_level
-# Discard possible TX echo (main CRC cause on half-duplex)
-time.sleep(0.002)
-echo_n = ser.in_waiting
-if echo_n:
-    echo = ser.read(echo_n)
-    print(f"echo/garbage discarded ({len(echo)}): {echo.hex(' ')}")
-    if echo == req:
-        print("NOTE: full TX echo on RX — RE may be always on; discard is required")
-print(f"after TX RTS={int(ser.rts)} (must be RX={int(rx_level)})")
-time.sleep(0.05)
+time.sleep(0.15)
+print(f"after TX RTS={int(bool(ser.rts))} (expect RX={int(not active_high)})")
 
 rx = ser.read(64)
 print(f"RX ({len(rx)} bytes): {rx.hex(' ') if rx else '(empty)'}")
 if not rx:
-    print("Нет RX. Проверьте DE/RTS0, A/B, GND, baud/addr")
+    print("Нет RX. Если RTS после TX = 1 — ядро не опустило DE (типичный баг PL011).")
+    print("  Проверьте pinctrl get 17 → RTS0, A/B, GND")
+    print("  INVERT_RSE=1 bash deploy/check_modbus_raw.sh")
 elif check_crc(rx):
     print("OK: CRC valid")
-    if len(rx) >= 5 and rx[1] == 0x03:
-        print(f"  data={rx[3:-2].hex(' ')}")
 else:
-    print("CRC ERROR on received frame")
-    if rx.startswith(req[:1]) or req[:4] in rx:
-        print("  Looks like TX mixed with RX — increase de_turnaround_s or check echo")
-    print("  Try: INVERT_RSE=1  or  larger de_turnaround_s in settings.json")
+    print("CRC ERROR")
 
-ser.rts = rx_level
-print(f"final RTS={int(ser.rts)}")
+try:
+    ser.rts = not active_high
+except Exception:
+    pass
+print(f"final RTS={int(bool(ser.rts))}")
 ser.close()
 PY
