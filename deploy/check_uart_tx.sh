@@ -6,7 +6,6 @@ set -euo pipefail
 VENV_PATH="${VENV_PATH:-/home/rolexs/brk}"
 PYTHON="${PYTHON:-$VENV_PATH/bin/python}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export GPIOZERO_PIN_FACTORY="${GPIOZERO_PIN_FACTORY:-lgpio}"
 
 cd "$ROOT"
 echo "=== UART TX smoke test (RTS0 DE) ==="
@@ -18,11 +17,10 @@ echo
 "$PYTHON" - <<'PY'
 import os, sys, time
 sys.path.insert(0, ".")
-os.environ.setdefault("GPIOZERO_PIN_FACTORY", "lgpio")
 
 import serial
 from serial.rs485 import RS485Settings
-from brakovka_pi.config import load_runtime_config
+from brakovka_pi.config import RS485_RTS0_GPIO, load_runtime_config
 
 _emu, gpio_cfg, serial_cfg, *_ = load_runtime_config()
 port = serial_cfg.port
@@ -31,7 +29,7 @@ active_high = bool(serial_cfg.rs485_active_high)
 before = float(serial_cfg.de_delay_before_tx_s)
 after = float(serial_cfg.de_turnaround_s)
 
-print(f"port={port} baud={baud} DE=GPIO{serial_cfg.rs485_de} (uart_rts)")
+print(f"port={port} baud={baud} DE=GPIO{RS485_RTS0_GPIO} (UART RTS0)")
 ser = serial.Serial(port=port, baudrate=baud, bytesize=8, parity="N", stopbits=1, timeout=0.2)
 ser.rtscts = False
 ser.rs485_mode = RS485Settings(

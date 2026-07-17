@@ -11,31 +11,14 @@
   "serial": {
     "port": "/dev/serial0",
     "baudrate": 115200,
-    "parity": "N",
-    "stopbits": 1,
-    "bytesize": 8,
     "timeout_s": 3,
     "retries": 3,
     "unit_id": 1,
     "de_delay_before_tx_s": 0.002,
     "de_turnaround_s": 0.003,
-    "de_mode": "uart_rts",
-    "rs485_de": 17,
     "rs485_active_high": true,
     "reconnect_period_s": 2.0,
     "fails_before_reconnect": 2
-  },
-  "vfd": {
-    "profile": "delta_cp2000",
-    "reg_cmd": 8192,
-    "reg_freq": 8193,
-    "reg_status": 8192,
-    "reg_fault": 8448,
-    "reg_freq_out": 8451,
-    "freq_scale": 100,
-    "cmd_forward": 1,
-    "cmd_reverse": 2,
-    "cmd_stop": 0
   },
   "opcua": {
     "endpoint": "opc.tcp://0.0.0.0:4840/",
@@ -44,8 +27,6 @@
   "ui": {
     "window_title": "Brakovka HMI",
     "fullscreen": true,
-    "width": 1280,
-    "height": 800,
     "settings_password": "4444",
     "sounds_enabled": true
   },

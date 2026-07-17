@@ -6,8 +6,6 @@ VENV_PATH="${VENV_PATH:-/home/rolexs/brk}"
 PYTHON="${PYTHON:-$VENV_PATH/bin/python}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-export GPIOZERO_PIN_FACTORY="${GPIOZERO_PIN_FACTORY:-lgpio}"
-
 echo "=== Brakovka Modbus check ==="
 echo "python: $PYTHON"
 echo "root:   $ROOT"
@@ -29,11 +27,9 @@ cd "$ROOT"
 import asyncio
 import os
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, ".")
-os.environ.setdefault("GPIOZERO_PIN_FACTORY", "lgpio")
 
 # Avoid stale .pyc from an older modbus_rs485.py
 import brakovka_pi.modbus_rs485 as modbus_mod
@@ -43,7 +39,7 @@ if not hasattr(modbus_mod, "DE_CONTROL_VERSION"):
     print("ERROR: на Pi старый modbus_rs485.py (нет DE_CONTROL_VERSION). Скопируйте файл с ПК.")
     sys.exit(5)
 
-from brakovka_pi.config import load_runtime_config
+from brakovka_pi.config import RS485_RTS0_GPIO, load_runtime_config
 from brakovka_pi.modbus_rs485 import Rs485Vfd, VfdCommand
 
 emu, gpio_cfg, serial_cfg, vfd_cfg, *_rest = load_runtime_config()
@@ -52,12 +48,12 @@ print("settings emulator flag:", emu)
 print(
     f"serial: port={serial_cfg.port} baud={serial_cfg.baudrate} "
     f"parity={serial_cfg.parity} stop={serial_cfg.stopbits} "
-    f"unit_id={serial_cfg.unit_id} de_mode={serial_cfg.de_mode} "
-    f"DE=GPIO{serial_cfg.rs485_de}"
+    f"unit_id={serial_cfg.unit_id} DE=UART RTS0 GPIO{RS485_RTS0_GPIO} "
+    f"active_high={serial_cfg.rs485_active_high}"
 )
 print(
-    f"vfd regs: profile={vfd_cfg.profile} cmd={vfd_cfg.reg_cmd} freq={vfd_cfg.reg_freq} "
-    f"status={vfd_cfg.reg_status} fault={vfd_cfg.reg_fault} "
+    f"vfd regs (fixed CP2000): profile={vfd_cfg.profile} cmd={vfd_cfg.reg_cmd} "
+    f"freq={vfd_cfg.reg_freq} status={vfd_cfg.reg_status} fault={vfd_cfg.reg_fault} "
     f"freq_out={vfd_cfg.reg_freq_out} scale={vfd_cfg.freq_scale}"
 )
 
@@ -73,7 +69,8 @@ if port.is_symlink():
             "  In /boot/firmware/config.txt (or /boot/config.txt):\n"
             "    enable_uart=1\n"
             "    dtparam=uart0=on\n"
-            "    dtoverlay=disable-bt   # Pi4 often needed so ttyAMA0 is on header\n"
+            "    dtoverlay=disable-bt\n"
+            "    gpio=17=a3\n"
             "  Then: sudo reboot\n"
             "  Expect: /dev/serial0 -> ttyAMA0"
         )
@@ -94,20 +91,10 @@ async def main() -> int:
         )
         return 5
 
-    print(f"\nDE: mode={getattr(vfd, 'de_mode', '?')} ok={de_ok} error={de_err or '(none)'}")
+    print(f"\nDE: UART RTS0 GPIO{RS485_RTS0_GPIO} ok={de_ok} error={de_err or '(none)'}")
     if not de_ok:
-        print("CRITICAL: DE/RE not driven — half-duplex usually cannot receive.")
-        if getattr(serial_cfg, "de_mode", "") in ("uart_rts", "rts", "rts0"):
-            print("  For uart_rts: ensure gpio=17=a3 in config.txt and DE wired to GPIO17.")
-
-    if de_ok and getattr(vfd, "de_mode", "") == "gpio":
-        print("Pulsing DE GPIO high 0.3s ...")
-        vfd._tx_mode()
-        time.sleep(0.3)
-        vfd._rx_mode()
-        print("DE back to RX (low)")
-    elif de_ok:
-        print("DE via UART RTS0 (auto during TX)")
+        print("CRITICAL: RS485Settings unavailable — half-duplex usually cannot receive.")
+        print("  Ensure pyserial is installed and gpio=17=a3 in config.txt.")
 
     print("\n1) connect ...")
     await vfd.connect()
@@ -115,15 +102,16 @@ async def main() -> int:
         print("FAIL: Modbus connect() did not open the port")
         return 3
     print("OK: port open")
-    print(f"DE turnaround patched: {getattr(vfd, 'de_patched', False)}")
+    print(f"DE RTS0 enabled: {getattr(vfd, 'de_patched', False)}")
     if not getattr(vfd, "de_patched", False):
-        print("WARN: DE patch failed — RX likely broken on half-duplex RS485")
+        print("WARN: rs485_mode failed — RX likely broken on half-duplex RS485")
+        print("  Check: gpio=17=a3, DE wired to GPIO17, pinctrl get 17 → RTS0")
 
     print("\n2) read status/fault holding registers ...")
     st = await vfd.read_status()
     if not st:
         print("FAIL: no response from slave")
-        print("Checklist: swap A/B, GND, VFD baud/addr/RTU, DE toggle, not ttyS0 if unstable")
+        print("Checklist: swap A/B, GND, VFD baud/addr/RTU, RTS0, not ttyS0 if unstable")
         await vfd.close()
         return 4
 

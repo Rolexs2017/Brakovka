@@ -48,6 +48,7 @@ class GpioConfig:
 class SerialConfig:
     port: str = "/dev/serial0"
     baudrate: int = 115200
+    # Fixed 8N1 for Delta CP2000 Modbus RTU (not in settings.json).
     parity: str = "N"
     stopbits: int = 1
     bytesize: int = 8
@@ -56,19 +57,19 @@ class SerialConfig:
     unit_id: int = 1
     de_delay_before_tx_s: float = 0.002
     de_turnaround_s: float = 0.003
-    # UART RTS0 is GPIO17 (ALT3). Use "uart_rts" (default) or legacy "gpio".
-    de_mode: str = "uart_rts"
-    rs485_de: int = 17
-    # Waveshare SP3485 RSE: normally HIGH=TX. Set false if board inverts RSE/RTS.
+    # Waveshare SP3485 RSE via UART RTS0 (GPIO17): HIGH=TX when True.
     rs485_active_high: bool = True
-    # Re-open serial/Modbus after errors or lost link.
     reconnect_period_s: float = 2.0
     fails_before_reconnect: int = 2
 
 
+# UART0 RTS0 pin for DE/RE (ALT3). Documented for logs/diagnostics only.
+RS485_RTS0_GPIO = 17
+
+
 @dataclass(frozen=True)
 class VfdConfig:
-    # Delta CP2000 Modbus map (holding registers, FC 03/06).
+    # Delta CP2000 Modbus map (holding registers, FC 03/06) — fixed in code.
     reg_cmd: int = 0x2000
     reg_freq: int = 0x2001
     reg_status: int = 0x2000
@@ -175,33 +176,18 @@ def load_runtime_config():
     serial = SerialConfig(
         port=str(s.serial.get("port", "/dev/serial0")),
         baudrate=int(s.serial.get("baudrate", 115200)),
-        parity=str(s.serial.get("parity", "N")),
-        stopbits=int(s.serial.get("stopbits", 1)),
-        bytesize=int(s.serial.get("bytesize", 8)),
         timeout_s=float(s.serial.get("timeout_s", 0.5)),
         retries=int(s.serial.get("retries", 3)),
         unit_id=int(s.serial.get("unit_id", 1)),
         de_delay_before_tx_s=float(s.serial.get("de_delay_before_tx_s", 0.002)),
         de_turnaround_s=float(s.serial.get("de_turnaround_s", 0.003)),
-        de_mode=str(s.serial.get("de_mode", "uart_rts")),
-        rs485_de=int(s.serial.get("rs485_de", 17)),
         rs485_active_high=bool(s.serial.get("rs485_active_high", True)),
         reconnect_period_s=_clamp(float(s.serial.get("reconnect_period_s", 2.0)), 0.5, 60.0),
         fails_before_reconnect=max(1, int(s.serial.get("fails_before_reconnect", 2))),
     )
 
-    vfd = VfdConfig(
-        reg_cmd=int(s.vfd.get("reg_cmd", 0x2000)),
-        reg_freq=int(s.vfd.get("reg_freq", 0x2001)),
-        reg_status=int(s.vfd.get("reg_status", 0x2000)),
-        reg_fault=int(s.vfd.get("reg_fault", 0x2100)),
-        reg_freq_out=int(s.vfd.get("reg_freq_out", 0x2103)),
-        freq_scale=int(s.vfd.get("freq_scale", 100)),
-        cmd_forward=int(s.vfd.get("cmd_forward", 0x0001)),
-        cmd_reverse=int(s.vfd.get("cmd_reverse", 0x0002)),
-        cmd_stop=int(s.vfd.get("cmd_stop", 0x0000)),
-        profile=str(s.vfd.get("profile", "delta_cp2000")),
-    )
+    # Delta CP2000 register map is fixed in VfdConfig defaults (not in settings.json).
+    vfd = VfdConfig()
 
     opcua = OpcUaConfig(
         endpoint=str(s.opcua.get("endpoint", "opc.tcp://0.0.0.0:4840/")),
