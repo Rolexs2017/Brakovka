@@ -5,6 +5,7 @@ import sys
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
@@ -17,6 +18,12 @@ from PySide6.QtWidgets import (
 )
 
 from brakovka_hmi.bridge import LocalBridge
+from brakovka_pi.pid_tune import (
+    PID_TUNE_METHOD_HINTS,
+    PID_TUNE_METHOD_LABELS,
+    PID_TUNE_METHOD_ORDER,
+    PidTuneMethod,
+)
 from brakovka_hmi.snapshot import MOVING_STATES, MachineSnapshot, MachineState
 from brakovka_hmi.sounds import play_error, play_ok
 from brakovka_hmi.ui.form_guard import EditableFormMixin
@@ -114,12 +121,14 @@ class SettingsScreen(EditableFormMixin, QWidget):
             self._kp,
             self._ti,
             self._kd,
+            self._mpm_per_hz,
             self._roll_dia,
         )
         self._init_form_guard(
             list(self._form_widgets_list),
             dirty_changed=self._on_dirty_changed,
         )
+        self._on_pid_method_changed()
         self._show_page(PAGE_HUB)
         self._refresh_emulator_ui()
         self._refresh_invert_ui()
@@ -177,6 +186,26 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._kd.setRange(0.0, 100.0)
         self._kd.setDecimals(2)
 
+        self._pid_method_group = QButtonGroup(self)
+        self._pid_method_group.setExclusive(True)
+        self._pid_method_buttons: dict[str, QPushButton] = {}
+        for method in PID_TUNE_METHOD_ORDER:
+            btn = QPushButton(PID_TUNE_METHOD_LABELS[method])
+            btn.setObjectName("pidMethod")
+            btn.setCheckable(True)
+            btn.setMinimumHeight(48)
+            self._pid_method_group.addButton(btn)
+            self._pid_method_buttons[method] = btn
+        relay_btn = self._pid_method_buttons[PidTuneMethod.RELAY.value]
+        relay_btn.setChecked(True)
+        for btn in self._pid_method_buttons.values():
+            btn.clicked.connect(self._on_pid_method_changed)
+            btn.clicked.connect(self._mark_form_dirty)
+
+        self._mpm_per_hz = TouchDoubleSpinBox(keypad_title="Feedforward (м/мин)/Гц")
+        self._mpm_per_hz.setRange(0.01, 1000.0)
+        self._mpm_per_hz.setDecimals(3)
+
         self._roll_dia = TouchSpinBox(keypad_title="Диаметр мерительного ролика")
         self._roll_dia.setRange(20, 1000)
         self._roll_dia.setSuffix(" мм")
@@ -233,7 +262,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
             0,
         )
         grid.addWidget(
-            self._group_button("PID", "Kp / Ti / Kd, автонастройка", PAGE_PID),
+            self._group_button("PID", "Метод автонастройки, Kp / Ti / Kd", PAGE_PID),
             0,
             1,
         )
@@ -276,10 +305,37 @@ class SettingsScreen(EditableFormMixin, QWidget):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setSpacing(10)
+
+        method_title = QLabel("Метод автонастройки")
+        method_title.setStyleSheet("color: #8aa4b8; font-size: 10pt; font-weight: 600;")
+        lay.addWidget(method_title)
+
+        method_col = QVBoxLayout()
+        method_col.setSpacing(8)
+        for method in PID_TUNE_METHOD_ORDER:
+            method_col.addWidget(self._pid_method_buttons[method])
+        lay.addLayout(method_col)
+
+        self._pid_method_hint = QLabel(PID_TUNE_METHOD_HINTS[PidTuneMethod.RELAY.value])
+        self._pid_method_hint.setWordWrap(True)
+        self._pid_method_hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        lay.addWidget(self._pid_method_hint)
+
+        self._pid_params_summary = QLabel("")
+        self._pid_params_summary.setWordWrap(True)
+        self._pid_params_summary.setStyleSheet("color: #e8f1f8; font-size: 10pt;")
+        lay.addWidget(self._pid_params_summary)
+
+        coeffs_title = QLabel("Коэффициенты")
+        coeffs_title.setStyleSheet("color: #8aa4b8; font-size: 10pt; font-weight: 600;")
+        lay.addWidget(coeffs_title)
+
         form = _form()
         form.addRow("PID Kp", self._kp)
         form.addRow("PID Ti", self._ti)
         form.addRow("PID Kd", self._kd)
+        self._mpm_per_hz_label = QLabel("FF (м/мин)/Гц")
+        form.addRow(self._mpm_per_hz_label, self._mpm_per_hz)
         lay.addLayout(form)
 
         tune_row = QHBoxLayout()
@@ -301,18 +357,27 @@ class SettingsScreen(EditableFormMixin, QWidget):
         lay.addLayout(tune_row)
 
         self._autotune_status = QLabel(
-            "Автонастройка PID: тест на скорости JOG (только в Ожидании)."
+            "Автонастройка PID: выберите метод и запустите тест (только в Ожидании)."
         )
         self._autotune_status.setWordWrap(True)
         self._autotune_status.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
         lay.addWidget(self._autotune_status)
         lay.addStretch()
+
+        for w in (self._kp, self._ti, self._kd, self._mpm_per_hz):
+            w.valueChanged.connect(self._update_pid_summary_from_form)
         return page
 
     def _build_pid_trend_page(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setSpacing(8)
+
+        self._pid_trend_info = QLabel("Метод: —")
+        self._pid_trend_info.setWordWrap(True)
+        self._pid_trend_info.setStyleSheet("color: #e8f1f8; font-size: 10pt; font-weight: 600;")
+        lay.addWidget(self._pid_trend_info)
+
         hint = QLabel(
             "Тренд ~60 с: скорость (м/мин, бирюзовый) и выход PID (% от 320 Гц, оранжевый)."
         )
@@ -461,6 +526,11 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._btn_invert.setEnabled(snap.connected and not tuning)
         self._btn_autotune.setEnabled(snap.connected and idle and not tuning)
         self._btn_abort_tune.setEnabled(snap.connected and tuning)
+        for btn in self._pid_method_buttons.values():
+            btn.setEnabled(snap.connected and not tuning)
+
+        if snap.connected and not self.form_is_locked():
+            self._refresh_pid_visualization(snap)
 
         st = snap.autotune_status or "idle"
         msg = snap.autotune_message or ""
@@ -480,6 +550,8 @@ class SettingsScreen(EditableFormMixin, QWidget):
                         self._kp.setValue(float(settings.get("pid_kp", 0.0)))
                         self._ti.setValue(float(settings.get("pid_ti", 0.0)))
                         self._kd.setValue(float(settings.get("pid_kd", 0.0)))
+                        self._mpm_per_hz.setValue(float(settings.get("mpm_per_hz", 1.0)))
+                        self._set_pid_tune_method(str(settings.get("pid_tune_method", "relay")))
                         self._kp.blockSignals(False)
                         self._ti.blockSignals(False)
                         self._kd.blockSignals(False)
@@ -491,23 +563,136 @@ class SettingsScreen(EditableFormMixin, QWidget):
             self._autotune_status.setStyleSheet("color: #ff4d4d; font-size: 9pt;")
         else:
             self._autotune_status.setText(
-                "Автонастройка PID: тест на скорости JOG (только в Ожидании)."
+                "Автонастройка PID: выберите метод и запустите тест (только в Ожидании)."
             )
             self._autotune_status.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
         self._prev_autotune_status = st
+
+    def _selected_pid_tune_method(self) -> str:
+        for method, btn in self._pid_method_buttons.items():
+            if btn.isChecked():
+                return method
+        return PidTuneMethod.RELAY.value
+
+    def _set_pid_tune_method(self, method: str) -> None:
+        btn = self._pid_method_buttons.get(method)
+        for b in self._pid_method_buttons.values():
+            b.blockSignals(True)
+        if btn is not None:
+            btn.setChecked(True)
+        else:
+            self._pid_method_buttons[PidTuneMethod.RELAY.value].setChecked(True)
+        for b in self._pid_method_buttons.values():
+            b.blockSignals(False)
+        self._on_pid_method_changed()
+
+    def _format_pid_summary(
+        self,
+        *,
+        method: str,
+        kp: float,
+        ti: float,
+        kd: float,
+        mpm_per_hz: float,
+    ) -> str:
+        label = PID_TUNE_METHOD_LABELS.get(method, method)
+        parts = [
+            f"Метод: {label}",
+            f"Kp={kp:.2f}",
+            f"Ti={ti:.2f}",
+        ]
+        if method == PidTuneMethod.PI_FF.value:
+            parts.append(f"FF={mpm_per_hz:.3f} (м/мин)/Гц")
+            parts.append("Kd не используется")
+        else:
+            parts.append(f"Kd={kd:.3f}")
+        return "  ·  ".join(parts)
+
+    def _refresh_pid_visualization(self, snap: MachineSnapshot) -> None:
+        method = str(snap.pid_tune_method or PidTuneMethod.RELAY.value)
+        summary = self._format_pid_summary(
+            method=method,
+            kp=float(snap.pid_kp),
+            ti=float(snap.pid_ti),
+            kd=float(snap.pid_kd),
+            mpm_per_hz=float(snap.mpm_per_hz),
+        )
+        self._pid_params_summary.setText(summary)
+        if hasattr(self, "_pid_trend_info"):
+            self._pid_trend_info.setText(summary)
+
+    def _on_pid_method_changed(self) -> None:
+        method = self._selected_pid_tune_method()
+        self._pid_method_hint.setText(
+            PID_TUNE_METHOD_HINTS.get(method, "")
+        )
+        is_ff = method == PidTuneMethod.PI_FF.value
+        self._mpm_per_hz.setVisible(is_ff)
+        self._mpm_per_hz_label.setVisible(is_ff)
+        self._kd.setEnabled(not is_ff)
+        summary = self._format_pid_summary(
+            method=method,
+            kp=float(self._kp.value()),
+            ti=float(self._ti.value()),
+            kd=float(self._kd.value()),
+            mpm_per_hz=float(self._mpm_per_hz.value()),
+        )
+        if hasattr(self, "_pid_params_summary"):
+            self._pid_params_summary.setText(summary)
+        if hasattr(self, "_pid_trend_info"):
+            self._pid_trend_info.setText(summary)
+
+    def _update_pid_summary_from_form(self, *_args) -> None:
+        if not hasattr(self, "_pid_params_summary"):
+            return
+        method = self._selected_pid_tune_method()
+        summary = self._format_pid_summary(
+            method=method,
+            kp=float(self._kp.value()),
+            ti=float(self._ti.value()),
+            kd=float(self._kd.value()),
+            mpm_per_hz=float(self._mpm_per_hz.value()),
+        )
+        self._pid_params_summary.setText(summary)
+        if hasattr(self, "_pid_trend_info"):
+            self._pid_trend_info.setText(summary)
+
+    def _autotune_dialog_text(self) -> str:
+        method = self._selected_pid_tune_method()
+        if method == PidTuneMethod.STEP_IMC.value:
+            return (
+                "Будет открытый ступенчатый тест частоты ПЧ и расчёт PID по IMC.\n"
+                "Материал должен быть заправлен. СТОП — прерывание.\n\n"
+                "Запустить?"
+            )
+        if method == PidTuneMethod.PI_FF.value:
+            return (
+                "Будет ступенчатый тест для калибровки feedforward (м/мин)/Гц "
+                "и небольших PI-коррекций.\n"
+                "Материал должен быть заправлен. СТОП — прерывание.\n\n"
+                "Запустить?"
+            )
+        return (
+            "Будет короткий тестовый прогон на скорости JOG с колебаниями частоты ПЧ "
+            "(relay / Ziegler–Nichols).\n"
+            "Материал должен быть заправлен. СТОП — прерывание.\n\n"
+            "Запустить?"
+        )
 
     def _start_autotune(self) -> None:
         reply = QMessageBox.question(
             self,
             "Автонастройка PID",
-            "Будет короткий тестовый прогон на скорости JOG с колебаниями частоты ПЧ "
-            "(relay / Ziegler–Nichols).\n"
-            "Материал должен быть заправлен. СТОП — прерывание.\n\n"
-            "Запустить?",
+            self._autotune_dialog_text(),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
+            return
+        # Persist selected method before starting (controller reads it at autotune start).
+        if not self._bridge.write_settings({"pid_tune_method": self._selected_pid_tune_method()}):
+            play_error()
+            QMessageBox.warning(self, "Автонастройка PID", "Не удалось сохранить метод PID.")
             return
         if self._bridge.start_pid_autotune():
             play_ok()
@@ -603,10 +788,13 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._kp.setValue(settings.get("pid_kp", 0.0))
         self._ti.setValue(settings.get("pid_ti", 0.0))
         self._kd.setValue(settings.get("pid_kd", 0.0))
+        self._mpm_per_hz.setValue(float(settings.get("mpm_per_hz", 1.0)))
+        self._set_pid_tune_method(str(settings.get("pid_tune_method", "relay")))
         self._roll_dia.setValue(int(round(settings.get("roll_diameter_mm", 200.0))))
 
         for w in widgets:
             w.blockSignals(False)
+        self._on_pid_method_changed()
 
     def _refresh_invert_ui(self, settings: dict | None = None) -> None:
         if settings is not None and "encoder_invert" in settings:
@@ -747,6 +935,8 @@ class SettingsScreen(EditableFormMixin, QWidget):
             "pid_kp": float(self._kp.value()),
             "pid_ti": float(self._ti.value()),
             "pid_kd": float(self._kd.value()),
+            "pid_tune_method": self._selected_pid_tune_method(),
+            "mpm_per_hz": float(self._mpm_per_hz.value()),
             "roll_diameter_mm": float(self._roll_dia.value()),
         })
         if ok:

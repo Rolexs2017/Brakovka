@@ -17,6 +17,7 @@ from .machine import Inputs, Machine
 from .modbus_rs485 import Rs485Vfd, VfdCommand
 from .opcua_srv import OpcUaBridge
 from .pid_autotune import AutotunePhase, PidAutotuner
+from .pid_tune import PidTuneMethod, StepResponseAutotuner, parse_pid_tune_method
 from .setpoints import SETPOINTS, machine_params_to_json
 from .settings import save_machine_section
 from .state import MachineState
@@ -27,6 +28,52 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 machine_log = logging.getLogger("brakovka.machine")
+
+
+def _make_pid_autotuner(m: Machine) -> PidAutotuner | StepResponseAutotuner:
+    method = parse_pid_tune_method(m.params.pid_tune_method)
+    kp_lo = SETPOINTS["pid_kp"].lo
+    kp_hi = SETPOINTS["pid_kp"].hi
+    ti_lo = SETPOINTS["pid_ti"].lo
+    ti_hi = SETPOINTS["pid_ti"].hi
+    kd_lo = SETPOINTS["pid_kd"].lo
+    kd_hi = SETPOINTS["pid_kd"].hi
+
+    if method == PidTuneMethod.RELAY.value:
+        bias_scale = 1.0 / max(float(m.params.emu_mpm_per_hz), 0.1)
+        return PidAutotuner(
+            setpoint_mpm=float(m.params.jog_speed_mpm),
+            relay_amp_hz=8.0,
+            hysteresis_mpm=0.3,
+            min_cycles=3,
+            timeout_s=45.0,
+            ramp_s=3.0,
+            bias_hz_per_mpm=bias_scale,
+            kp_lo=kp_lo,
+            kp_hi=kp_hi,
+            ti_lo=ti_lo,
+            ti_hi=ti_hi,
+            kd_lo=kd_lo,
+            kd_hi=kd_hi,
+        )
+
+    est_gain = max(0.1, float(m.params.mpm_per_hz))
+    if method != PidTuneMethod.PI_FF.value:
+        est_gain = max(0.1, float(m.params.emu_mpm_per_hz))
+    step_hz = max(8.0, min(24.0, float(m.params.jog_speed_mpm) / est_gain))
+    return StepResponseAutotuner(
+        mode=method,
+        step_hz=step_hz,
+        baseline_s=2.0,
+        step_duration_s=10.0,
+        timeout_s=40.0,
+        kp_lo=kp_lo,
+        kp_hi=kp_hi,
+        ti_lo=ti_lo,
+        ti_hi=ti_hi,
+        kd_lo=kd_lo,
+        kd_hi=kd_hi,
+    )
 
 
 def _merge_inputs(gpio_inp: Inputs, *sources: dict) -> Inputs:
@@ -169,7 +216,7 @@ async def run_controller(
         prev_modbus_error = False
         last_task_ok_t = monotonic()
         watchdog_limit_s = float(timing_cfg.watchdog_limit_s)
-        autotuner: PidAutotuner | None = None
+        autotuner: PidAutotuner | StepResponseAutotuner | None = None
 
         p_task = _Periodic(timing_cfg.task_period_s)
         p_opc_poll = _Periodic(timing_cfg.opcua_poll_period_s)
@@ -315,30 +362,16 @@ async def run_controller(
                 actual_mpm = m.telem.speed_mpm
                 stopping = state == MachineState.STOPPING
 
-                # --- PID autotune (relay) or normal ramp+PID ---
+                # --- PID autotune or normal ramp+PID ---
                 if m.telem.autotune_active:
                     if autotuner is None:
-                        bias_scale = 1.0 / max(float(m.params.emu_mpm_per_hz), 0.1)
-                        autotuner = PidAutotuner(
-                            setpoint_mpm=float(m.params.jog_speed_mpm),
-                            relay_amp_hz=8.0,
-                            hysteresis_mpm=0.3,
-                            min_cycles=3,
-                            timeout_s=45.0,
-                            ramp_s=3.0,
-                            bias_hz_per_mpm=bias_scale,
-                            kp_lo=SETPOINTS["pid_kp"].lo,
-                            kp_hi=SETPOINTS["pid_kp"].hi,
-                            ti_lo=SETPOINTS["pid_ti"].lo,
-                            ti_hi=SETPOINTS["pid_ti"].hi,
-                            kd_lo=SETPOINTS["pid_kd"].lo,
-                            kd_hi=SETPOINTS["pid_kd"].hi,
-                        )
+                        method = parse_pid_tune_method(m.params.pid_tune_method)
+                        autotuner = _make_pid_autotuner(m)
                         autotuner.start()
                         machine_log.info(
-                            "PID autotune started: setpoint=%.1f mpm amp=%.1f Hz",
+                            "PID autotune started: method=%s jog=%.1f mpm",
+                            method,
                             m.params.jog_speed_mpm,
-                            8.0,
                         )
                     tune = autotuner.step(actual_mpm, ctrl_dt)
                     m.telem.autotune_message = tune.message
@@ -350,6 +383,8 @@ async def run_controller(
                             m.apply_setpoint("pid_kp", r.kp)
                             m.apply_setpoint("pid_ti", r.ti)
                             m.apply_setpoint("pid_kd", r.kd)
+                            if r.mpm_per_hz is not None:
+                                m.apply_setpoint("mpm_per_hz", r.mpm_per_hz)
                             try:
                                 save_machine_section(machine_params_to_json(m.params))
                             except Exception:
@@ -380,7 +415,7 @@ async def run_controller(
                     if autotuner is not None:
                         autotuner = None
                     sp_mpm = m.update_speed_ramp(ctrl_dt)
-                    raw_freq_cmd_hz = m.pid_speed_to_hz(sp_mpm, actual_mpm, ctrl_dt)
+                    raw_freq_cmd_hz = m.speed_to_hz(sp_mpm, actual_mpm, ctrl_dt)
                     run_cmd = (not stopping) and sp_mpm > 0.01 and inp.estop_ok
                     if not run_cmd or stopping or entered_stopping:
                         freq_cmd_hz = 0.0

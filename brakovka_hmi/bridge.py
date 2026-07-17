@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from brakovka_hmi.snapshot import (
     CmdBit,
@@ -20,6 +20,7 @@ from brakovka_pi.setpoints import (
     machine_params_to_json,
     machine_params_to_ui,
 )
+from brakovka_pi.pid_tune import parse_pid_tune_method
 from brakovka_pi.gpio_io import GpioLevels
 from brakovka_pi.settings import (
     read_emulator_setting,
@@ -116,7 +117,7 @@ class LocalBridge:
                 reset_wound=bool(pulses & int(CmdBit.RESET_WOUND)),
             ).as_dict()
 
-    def write_settings(self, values: dict[str, float]) -> bool:
+    def write_settings(self, values: dict[str, Any]) -> bool:
         """Apply setpoints from HMI only when operator presses Save / Reset roll."""
         with self._lock:
             if self._machine is None:
@@ -125,6 +126,10 @@ class LocalBridge:
             applied = False
             blocked_roll = False
             for key, value in values.items():
+                if key == "pid_tune_method":
+                    self._machine.apply_pid_tune_method(str(value))
+                    applied = True
+                    continue
                 sp = UI_TO_MACHINE.get(key)
                 if sp is None:
                     continue
@@ -260,12 +265,14 @@ class LocalBridge:
                 "diameter_mm": float(m.params.roll_diameter_m * 1000.0),
             }
 
-    def read_settings(self) -> dict[str, float] | None:
+    def read_settings(self) -> dict[str, Any] | None:
         with self._lock:
             m = self._machine
             if m is None:
                 return None
-            return machine_params_to_ui(m.params)
+            out = machine_params_to_ui(m.params)
+            out["pid_tune_method"] = parse_pid_tune_method(m.params.pid_tune_method)
+            return out
 
     def read_snapshot(self) -> MachineSnapshot:
         with self._lock:
@@ -335,4 +342,9 @@ class LocalBridge:
                 autotune_active=bool(t.autotune_active),
                 autotune_status=str(t.autotune_status or "idle"),
                 autotune_message=str(t.autotune_message or ""),
+                pid_tune_method=parse_pid_tune_method(p.pid_tune_method),
+                pid_kp=float(p.pid_kp),
+                pid_ti=float(p.pid_ti),
+                pid_kd=float(p.pid_kd),
+                mpm_per_hz=float(p.mpm_per_hz),
             )

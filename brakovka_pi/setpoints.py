@@ -161,6 +161,14 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         unit_note="Hz·s/(m/min)",
     ),
     _sp(
+        "mpm_per_hz",
+        ui_key="mpm_per_hz",
+        lo=0.01,
+        hi=1000.0,
+        persist=True,
+        unit_note="(m/min)/Hz feedforward gain",
+    ),
+    _sp(
         "roll_encoder_diameter_mm",
         ui_key="roll_diameter_mm",
         opc_name="RollEncoder_mm",
@@ -308,11 +316,14 @@ def machine_params_to_ui(params: Any) -> dict[str, float]:
         if sp.ui_key is None:
             continue
         out[sp.ui_key] = _value_from_params(params, sp)
+    out["pid_tune_method"] = str(getattr(params, "pid_tune_method", "relay"))
     return out
 
 
 def machine_params_to_json(params: Any) -> dict[str, Any]:
     """Map MachineParams → settings.json ``machine`` section (mm where needed)."""
+    from .pid_tune import parse_pid_tune_method
+
     out: dict[str, Any] = {}
     for sp in _SETPOINT_LIST:
         if not sp.persist or sp.json_key is None:
@@ -323,4 +334,5 @@ def machine_params_to_json(params: Any) -> dict[str, Any]:
             out[sp.json_key] = bool(value)
         else:
             out[sp.json_key] = value
+    out["pid_tune_method"] = parse_pid_tune_method(getattr(params, "pid_tune_method", "relay"))
     return out

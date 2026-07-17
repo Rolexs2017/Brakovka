@@ -10,6 +10,8 @@ class AutotunePhase(str, Enum):
     IDLE = "idle"
     RAMP = "ramp"
     RELAY = "relay"
+    BASELINE = "baseline"
+    STEP = "step"
     DONE = "done"
     FAILED = "failed"
     ABORTED = "aborted"
@@ -20,9 +22,10 @@ class AutotuneResult:
     kp: float
     ti: float
     kd: float
-    ku: float
-    pu_s: float
-    amp_mpm: float
+    ku: float = 0.0
+    pu_s: float = 0.0
+    amp_mpm: float = 0.0
+    mpm_per_hz: float | None = None
 
 
 @dataclass

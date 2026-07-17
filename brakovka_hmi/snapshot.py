@@ -87,6 +87,11 @@ class MachineSnapshot:
     autotune_active: bool = False
     autotune_status: str = "idle"
     autotune_message: str = ""
+    pid_tune_method: str = "relay"
+    pid_kp: float = 0.0
+    pid_ti: float = 0.0
+    pid_kd: float = 0.0
+    mpm_per_hz: float = 1.0
 
     @property
     def state_name(self) -> str:

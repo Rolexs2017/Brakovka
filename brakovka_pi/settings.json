@@ -62,6 +62,8 @@
     "pid_kp": 17.464554039296157,
     "pid_ti": 0.07786641666666583,
     "pid_kd": 0.33997556043033406,
+    "pid_tune_method": "relay",
+    "mpm_per_hz": 1.0,
     "tension_brake_min_pct": 2.0,
     "brake_max_pressure_pct": 100.0,
     "max_ramp_speed_mpm": 300.0,

@@ -5,6 +5,7 @@ from math import isfinite
 from time import monotonic
 
 from .pid import Pid
+from .pid_tune import PidTuneMethod, parse_pid_tune_method
 from .roll_geometry import remaining_length_m as _length_from_diameter_m
 from .roll_geometry import start_diameter_from_length_m
 from .roll_geometry import unwind_diameter_m as _unwind_diameter_m
@@ -49,6 +50,10 @@ class MachineParams:
     pid_kp: float = 5.0
     pid_ti: float = 2.0
     pid_kd: float = 0.0
+    # relay | step_imc | pi_ff — autotune method and runtime control strategy
+    pid_tune_method: str = "relay"
+    # Feedforward gain (m/min)/Hz for pi_ff mode on real hardware
+    mpm_per_hz: float = 1.0
 
     # Emulator only: mapping Hz -> m/min
     emu_mpm_per_hz: float = 1.0
@@ -362,6 +367,14 @@ class Machine:
             return 0.0
         return max(0.0, min(self.params.brake_max_pressure_pct, tension_brake_pct))
 
+    def uses_pi_feedforward(self) -> bool:
+        return parse_pid_tune_method(self.params.pid_tune_method) == PidTuneMethod.PI_FF.value
+
+    def effective_mpm_per_hz(self) -> float:
+        if self.uses_pi_feedforward():
+            return max(0.01, float(self.params.mpm_per_hz))
+        return max(0.01, float(self.params.emu_mpm_per_hz))
+
     def pid_speed_to_hz(self, setpoint_mpm: float, actual_mpm: float, dt_s: float) -> float:
         """
         PID: ошибка в м/мин, выход в Гц (непосредственно задаём ПЧВ‑3 через 0x3100).
@@ -383,6 +396,35 @@ class Machine:
         self._pid_speed.out_min = 0.0
         self._pid_speed.out_max = 320.0
         return self._pid_speed.step(err, dt_s)
+
+    def pid_speed_to_hz_ff(self, setpoint_mpm: float, actual_mpm: float, dt_s: float) -> float:
+        """
+        PI + feedforward: freq = setpoint/mpm_per_hz + PI(error).
+
+        Kd is forced to 0 (PI correction only).
+        """
+        if setpoint_mpm <= 0.01:
+            self._pid_speed.reset()
+            return 0.0
+
+        ff_hz = setpoint_mpm / self.effective_mpm_per_hz()
+        err = setpoint_mpm - actual_mpm
+        self._pid_speed.kp = self.params.pid_kp
+        self._pid_speed.ti = self.params.pid_ti
+        self._pid_speed.kd = 0.0
+        self._pid_speed.out_min = 0.0
+        self._pid_speed.out_max = 320.0
+        pi_hz = self._pid_speed.step(err, dt_s)
+        return max(0.0, min(320.0, ff_hz + pi_hz))
+
+    def speed_to_hz(self, setpoint_mpm: float, actual_mpm: float, dt_s: float) -> float:
+        """Dispatch PID strategy based on pid_tune_method."""
+        if self.uses_pi_feedforward():
+            return self.pid_speed_to_hz_ff(setpoint_mpm, actual_mpm, dt_s)
+        return self.pid_speed_to_hz(setpoint_mpm, actual_mpm, dt_s)
+
+    def apply_pid_tune_method(self, method: str) -> None:
+        self.params.pid_tune_method = parse_pid_tune_method(method)
 
     def apply_setpoint(self, name: str, value: float) -> None:
         # Minimal validation: ignore NaN/inf

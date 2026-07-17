@@ -5,6 +5,7 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
+from .pid_tune import parse_pid_tune_method
 from .setpoints import SETPOINTS, clamp as sp_clamp
 from .settings import load_settings
 
@@ -17,6 +18,10 @@ def _parse_rs485_de(raw: object) -> Optional[int]:
         return None
     pin = int(raw)  # type: ignore[arg-type]
     return pin if pin > 0 else None
+
+
+def _parse_pid_tune_method(raw: object) -> str:
+    return parse_pid_tune_method(raw)
 
 
 def resolve_emulator(emu_from_file: bool) -> bool:
@@ -88,9 +93,9 @@ class VfdConfig:
     reg_fault: int = 0x2100
     reg_freq_out: int = 0x2103
     freq_scale: int = 100
-    cmd_forward: int = 0x0001
-    cmd_reverse: int = 0x0002
-    cmd_stop: int = 0x0000
+    cmd_forward: int = 18
+    cmd_reverse: int = 34
+    cmd_stop: int = 1
     profile: str = "delta_cp2000"
 
 
@@ -120,6 +125,8 @@ class MachineConfig:
     pid_kp: float = 5.0
     pid_ti: float = 2.0
     pid_kd: float = 0.0
+    pid_tune_method: str = "relay"
+    mpm_per_hz: float = 1.0
     tension_brake_min_pct: float = 2.0
     brake_max_pressure_pct: float = 100.0
     max_ramp_speed_mpm: float = 300.0
@@ -150,6 +157,8 @@ class MachineConfig:
         p.pid_kp = self.pid_kp
         p.pid_ti = self.pid_ti
         p.pid_kd = self.pid_kd
+        p.pid_tune_method = parse_pid_tune_method(self.pid_tune_method)
+        p.mpm_per_hz = self.mpm_per_hz
         p.tension_brake_min_pct = self.tension_brake_min_pct
         p.brake_max_pressure_pct = self.brake_max_pressure_pct
         p.max_ramp_speed_mpm = self.max_ramp_speed_mpm
@@ -281,6 +290,8 @@ def load_runtime_config():
         pid_kp=_machine_clamp("pid_kp", float(machine_raw.get("pid_kp", 5.0))),
         pid_ti=_machine_clamp("pid_ti", float(machine_raw.get("pid_ti", 2.0))),
         pid_kd=_machine_clamp("pid_kd", float(machine_raw.get("pid_kd", 0.0))),
+        pid_tune_method=_parse_pid_tune_method(machine_raw.get("pid_tune_method", "relay")),
+        mpm_per_hz=_machine_clamp("mpm_per_hz", float(machine_raw.get("mpm_per_hz", 1.0))),
         tension_brake_min_pct=_machine_clamp(
             "tension_brake_min_pct", float(machine_raw.get("tension_brake_min_pct", 2.0))
         ),

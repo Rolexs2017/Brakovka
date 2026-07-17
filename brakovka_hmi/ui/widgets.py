@@ -265,6 +265,25 @@ def build_stylesheet() -> str:
         font-size: 12pt;
         font-weight: 600;
     }}
+    QPushButton#pidMethod {{
+        min-height: 44px;
+        border-radius: 10px;
+        border: 1px solid {t.BORDER};
+        background-color: {t.PANEL};
+        color: {t.TEXT};
+        font-size: 10pt;
+        font-weight: 600;
+        padding: 8px 10px;
+        text-align: left;
+    }}
+    QPushButton#pidMethod:hover {{
+        border-color: {t.ACCENT};
+    }}
+    QPushButton#pidMethod:checked {{
+        background-color: rgba(0, 212, 255, 0.15);
+        border-color: {t.BORDER};
+        color: {t.TEXT};
+    }}
     QPushButton#settingsGroup:hover {{
         border-color: {t.ACCENT};
         color: {t.ACCENT};
