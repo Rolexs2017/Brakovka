@@ -353,7 +353,6 @@ async def run_controller(
                     else:
                         last_speed_mpm = 0.0
                     prev_wound_length_m = wound_m
-                m.telem.speed_mpm = last_speed_mpm
 
                 m.update_state(inp)
                 prev_reset_wound = inp.reset_wound_pulse
@@ -378,7 +377,8 @@ async def run_controller(
                     machine_log.info("Encoder recovered")
                 prev_encoder_error = m.telem.encoder_error
 
-                actual_mpm = pid_speed_avg.update(m.telem.speed_mpm)
+                actual_mpm = pid_speed_avg.update(last_speed_mpm)
+                m.telem.speed_mpm = actual_mpm
                 stopping = state == MachineState.STOPPING
 
                 # --- PID autotune or normal ramp+PID ---

@@ -284,11 +284,9 @@ PID рассчитывает **частоту для частотника в Hz*
 
 Поле `machine.mpm_per_hz` — коэффициент feedforward (м/мин)/Гц для режима `pi_ff`.
 
-### Сглаживание скорости для PID
+### Сглаживание скорости
 
-Скорость в телеметрии — из приращения метража за период задачи контроллера (`timing.task_period_s`).
-
-Перед регулятором скорости (PID / автонастройка) применяется **скользящее среднее арифметическое по 10 последним значениям**. Константа: `PID_REGULATOR_SPEED_AVG_N` в `encoder.py`.
+Скорость считается из приращения метража за период задачи контроллера (`timing.task_period_s`), затем **скользящее среднее по 10 последним значениям** (`PID_REGULATOR_SPEED_AVG_N` в `encoder.py`). Это сглаженное значение идёт в телеметрию/HMI и в регулятор (PID / автонастройка).
 
 Команда на ПЧ (`VfdFreqCmd_Hz`) **не сглаживается** — в Modbus уходит выход PID напрямую.
 
@@ -421,6 +419,15 @@ bash deploy/install_desktop_icon.sh
 ```bash
 cd ~/rpi_python
 git pull origin master
+```
+
+**Один раз** после перехода на локальный `settings.json` (если pull ругается, что файл будет удалён):
+
+```bash
+cp brakovka_pi/settings.json /tmp/settings.json.bak
+rm brakovka_pi/settings.json
+git pull origin master
+cp /tmp/settings.json.bak brakovka_pi/settings.json
 ```
 
 Первый клон (если нет `settings.json`):
