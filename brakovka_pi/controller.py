@@ -11,11 +11,12 @@ from .commands import merge_command_dicts
 from .config import load_runtime_config, resolve_emulator
 from .encoder import (
     Encoder,
-    PID_REGULATOR_SPEED_AVG_N,
-    SpeedMovingAverage,
+    PID_REGULATOR_SPEED_MEDIAN_N,
+    SPEED_LENGTH_WINDOW_S,
+    SpeedFromLengthWindow,
+    SpeedMedianFilter,
     SpeedOutlierReject,
     ThreadedEncoder,
-    speed_mpm_from_length_delta,
 )
 from .emulation import EmulatedVfd, SimEncoder
 from .gpio_io import GpioInputs
@@ -219,9 +220,9 @@ async def run_controller(
         last_task_ok_t = monotonic()
         watchdog_limit_s = float(timing_cfg.watchdog_limit_s)
         autotuner: PidAutotuner | StepResponseAutotuner | None = None
-        pid_speed_avg = SpeedMovingAverage(PID_REGULATOR_SPEED_AVG_N)
+        speed_window = SpeedFromLengthWindow(SPEED_LENGTH_WINDOW_S)
+        speed_median = SpeedMedianFilter(PID_REGULATOR_SPEED_MEDIAN_N)
         speed_outlier = SpeedOutlierReject(max_mpm=m.params.max_ramp_speed_mpm)
-        prev_wound_length_m: float | None = None
         last_speed_mpm = 0.0
 
         p_task = _Periodic(timing_cfg.task_period_s)
@@ -294,9 +295,9 @@ async def run_controller(
                     encoder.reset_unwind()
                     m.apply_new_unwind_roll()
                     m.reset_pid()
-                    pid_speed_avg.reset(0.0)
+                    speed_window.reset(0.0)
+                    speed_median.reset(0.0)
                     speed_outlier.reset(0.0)
-                    prev_wound_length_m = None
                     machine_log.info(
                         "Reset roll: length=%.0f m diameter=%.0f mm remaining=%.1f m",
                         m.params.unwind_roll_length_m,
@@ -306,9 +307,9 @@ async def run_controller(
                 if inp.reset_wound_pulse and not prev_reset_wound:
                     encoder.reset_wound()
                     m.reset_pid()
-                    pid_speed_avg.reset(0.0)
+                    speed_window.reset(0.0)
+                    speed_median.reset(0.0)
                     speed_outlier.reset(0.0)
-                    prev_wound_length_m = None
                     machine_log.info("Reset wound length")
 
                 if inp.start_pulse:
@@ -350,14 +351,7 @@ async def run_controller(
                     m.telem.magnet_ok = bool(e.magnet_ok)
 
                 if encoder_ok:
-                    if prev_wound_length_m is not None:
-                        last_speed_mpm = speed_mpm_from_length_delta(
-                            wound_m - prev_wound_length_m,
-                            ctrl_dt,
-                        )
-                    else:
-                        last_speed_mpm = 0.0
-                    prev_wound_length_m = wound_m
+                    last_speed_mpm = speed_window.update(wound_m, task_start)
 
                 m.update_state(inp)
                 prev_reset_wound = inp.reset_wound_pulse
@@ -383,7 +377,7 @@ async def run_controller(
                 prev_encoder_error = m.telem.encoder_error
 
                 clean_mpm = speed_outlier.update(last_speed_mpm)
-                actual_mpm = pid_speed_avg.update(clean_mpm)
+                actual_mpm = speed_median.update(clean_mpm)
                 m.telem.speed_mpm = actual_mpm
                 stopping = state == MachineState.STOPPING
 

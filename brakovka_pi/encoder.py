@@ -95,11 +95,47 @@ class SpeedOutlierReject:
         return raw
 
 
-class SpeedMovingAverage:
-    """Arithmetic mean over the last N speed samples (m/min)."""
+class SpeedFromLengthWindow:
+    """
+    Web speed (m/min) from wound length change over a sliding time window.
 
-    def __init__(self, window: int = 10) -> None:
-        self._window = max(1, int(window))
+    Longer Δt reduces AS5600 quantization noise vs one controller period.
+    """
+
+    def __init__(self, window_s: float = 0.1) -> None:
+        self._window_s = max(0.02, float(window_s))
+        self._samples: deque[tuple[float, float]] = deque()  # (t, wound_m)
+        self.value_mpm = 0.0
+
+    def reset(self, value_mpm: float = 0.0) -> None:
+        self._samples.clear()
+        self.value_mpm = max(0.0, float(value_mpm))
+
+    def update(self, wound_m: float, now_s: float) -> float:
+        t = float(now_s)
+        m = float(wound_m)
+        self._samples.append((t, m))
+        cutoff = t - self._window_s
+        while len(self._samples) > 1 and self._samples[0][0] < cutoff:
+            self._samples.popleft()
+        if len(self._samples) < 2:
+            return self.value_mpm
+        t0, m0 = self._samples[0]
+        dt = t - t0
+        if dt < 1e-3:
+            return self.value_mpm
+        self.value_mpm = speed_mpm_from_length_delta(m - m0, dt)
+        return self.value_mpm
+
+
+class SpeedMedianFilter:
+    """Median over the last N speed samples (odd window). N<=1 disables."""
+
+    def __init__(self, window: int = 11) -> None:
+        n = max(1, int(window))
+        if n > 1 and n % 2 == 0:
+            n += 1
+        self._window = n
         self._buf: deque[float] = deque(maxlen=self._window)
         self.value_mpm = 0.0
 
@@ -109,13 +145,18 @@ class SpeedMovingAverage:
 
     def update(self, raw_mpm: float) -> float:
         raw = max(0.0, float(raw_mpm))
+        if self._window <= 1:
+            self.value_mpm = raw
+            return self.value_mpm
         self._buf.append(raw)
-        self.value_mpm = sum(self._buf) / len(self._buf)
+        ordered = sorted(self._buf)
+        self.value_mpm = ordered[len(ordered) // 2]
         return self.value_mpm
 
 
-# Fixed window before speed PID / autotune (controller).
-PID_REGULATOR_SPEED_AVG_N = 10
+# Length window for ΔL/Δt, then median before PID / HMI (controller).
+SPEED_LENGTH_WINDOW_S = 0.1
+PID_REGULATOR_SPEED_MEDIAN_N = 11
 
 
 class Encoder:
