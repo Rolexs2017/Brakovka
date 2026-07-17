@@ -59,7 +59,7 @@ print(
     f"freq={vfd_cfg.reg_freq} status={vfd_cfg.reg_status} fault={vfd_cfg.reg_fault} "
     f"freq_out={vfd_cfg.reg_freq_out} scale={vfd_cfg.freq_scale}"
 )
-print("NOTE: GPIO17 must be normal GPIO (NOT RTS0). Remove gpio=17=a3 from config.txt if present.")
+print(f"NOTE: DE=GPIO{serial_cfg.rs485_de} must be ordinary GPIO (wire RSE to this pin).")
 
 port = Path(serial_cfg.port)
 if port.is_symlink():
@@ -97,7 +97,7 @@ async def main() -> int:
     print(f"\nDE: software GPIO{RS485_DE_GPIO} ok={de_ok} error={de_err or '(none)'}")
     if not de_ok:
         print("CRITICAL: GPIO DE not ready.")
-        print("  Stop app (pkill -f run_brakovka), check DE on GPIO17, pinctrl get 17 (not RTS0).")
+        print(f"  Stop app (pkill -f run_brakovka), check DE on GPIO{RS485_DE_GPIO}, pinctrl get {RS485_DE_GPIO}.")
 
     print("\n1) connect ...")
     await vfd.connect()
@@ -111,7 +111,7 @@ async def main() -> int:
     st = await vfd.read_status()
     if not st:
         print("FAIL: no response from slave")
-        print("Checklist: A/B, GND, baud/unit_id, DE on GPIO17 (software), remove gpio=17=a3")
+        print(f"Checklist: A/B, GND, baud/unit_id, DE on GPIO{serial_cfg.rs485_de} (software)")
         await vfd.close()
         return 4
 

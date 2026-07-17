@@ -58,14 +58,14 @@ class SerialConfig:
     de_delay_before_tx_s: float = 0.002
     de_turnaround_s: float = 0.003
     # Waveshare SP3485 RSE on GPIO (software DE). HIGH=TX when True.
-    rs485_de: int = 17
+    rs485_de: int = 16
     rs485_active_high: bool = True
     reconnect_period_s: float = 2.0
     fails_before_reconnect: int = 2
 
 
-# Default DE/RE pin (ordinary GPIO, not UART RTS0 ALT3).
-RS485_DE_GPIO = 17
+# Default DE/RE pin (ordinary GPIO).
+RS485_DE_GPIO = 16
 
 
 @dataclass(frozen=True)
@@ -182,7 +182,7 @@ def load_runtime_config():
         unit_id=int(s.serial.get("unit_id", 1)),
         de_delay_before_tx_s=float(s.serial.get("de_delay_before_tx_s", 0.002)),
         de_turnaround_s=float(s.serial.get("de_turnaround_s", 0.003)),
-        rs485_de=int(s.serial.get("rs485_de", 17)),
+        rs485_de=int(s.serial.get("rs485_de", 16)),
         rs485_active_high=bool(s.serial.get("rs485_active_high", True)),
         reconnect_period_s=_clamp(float(s.serial.get("reconnect_period_s", 2.0)), 0.5, 60.0),
         fails_before_reconnect=max(1, int(s.serial.get("fails_before_reconnect", 2))),

@@ -9,7 +9,7 @@ export GPIOZERO_PIN_FACTORY="${GPIOZERO_PIN_FACTORY:-lgpio}"
 
 cd "$ROOT"
 echo "=== UART TX + GPIO DE smoke test ==="
-echo "Probe: GPIO14 (TX), GPIO15 (RX), GPIO17 (DE), GND"
+echo "Probe: GPIO14 (TX), GPIO15 (RX), GPIO16 (DE), GND"
 echo "serial0 -> $(readlink -f /dev/serial0 2>/dev/null || echo missing)"
 echo "Ctrl+C to stop"
 echo

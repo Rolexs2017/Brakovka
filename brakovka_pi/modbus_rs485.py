@@ -41,10 +41,9 @@ class Rs485Vfd:
     """
     Async Modbus RTU over /dev/serial0 (PL011 hardware UART).
 
-    DE/RE for Waveshare SP3485: **software GPIO** (default GPIO17), toggled around TX.
-    Do **not** set ``gpio=17=a3`` — pin must be ordinary GPIO, not RTS0 ALT3.
+    DE/RE for Waveshare SP3485: **software GPIO** (default GPIO16), toggled around TX.
 
-    Wiring: TX=GPIO14, RX=GPIO15, DE/RE=GPIO17.
+    Wiring: TX=GPIO14, RX=GPIO15, DE/RE=GPIO16.
     """
 
     def __init__(

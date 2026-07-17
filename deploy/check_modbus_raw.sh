@@ -68,7 +68,7 @@ de_pin = int(sc.rs485_de)
 print(f"port={sc.port} baud={sc.baudrate} unit={sc.unit_id}")
 print(f"read reg=0x{reg:04X} ({reg}) profile={vc.profile}")
 print(f"DE=GPIO{de_pin} software active_high={active_high} (INVERT_RSE={invert})")
-print("NOTE: GPIO17 must NOT be RTS0 (remove gpio=17=a3 from config.txt)")
+print(f"NOTE: wire RSE/DE to GPIO{de_pin}")
 
 _configure_pin_factory(probe_pin=23)
 de = DigitalOutputDevice(de_pin, active_high=active_high, initial_value=False)
@@ -104,7 +104,7 @@ time.sleep(0.05)
 rx = ser.read(64)
 print(f"RX ({len(rx)} bytes): {rx.hex(' ') if rx else '(empty)'}")
 if not rx:
-    print("Нет RX. A/B, GND, unit_id, baud; pinctrl get 17 (не RTS0)")
+    print(f"Нет RX. A/B, GND, unit_id, baud; pinctrl get {de_pin}; INVERT_RSE=1")
 elif check_crc(rx):
     print("OK: CRC valid")
 else:
