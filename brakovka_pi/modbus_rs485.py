@@ -1,23 +1,24 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 
 try:
-    from serial.rs485 import RS485Settings
-except Exception:  # pragma: no cover
-    RS485Settings = None  # type: ignore
+    from gpiozero import DigitalOutputDevice  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    DigitalOutputDevice = None
 
 from pymodbus.client import AsyncModbusSerialClient
 from pymodbus.exceptions import ModbusIOException
 
-from .config import RS485_RTS0_GPIO, SerialConfig, VfdConfig
+from .config import RS485_DE_GPIO, SerialConfig, VfdConfig
 
 log = logging.getLogger(__name__)
 
-# Kernel/pyserial RS485: UART RTS0 (GPIO17) auto-toggled around TX via TIOCSRS485.
-DE_CONTROL_VERSION = "v9-uart-rts0-hw"
+# Hardware UART TX/RX + software GPIO DE (not UART RTS0).
+DE_CONTROL_VERSION = "v10-uart-hw-gpio-de"
 
 
 @dataclass
@@ -27,15 +28,23 @@ class VfdCommand:
     speed_setpoint_hz: float = 0.0
 
 
+def _ensure_pin_factory() -> None:
+    try:
+        from .gpio_io import _configure_pin_factory
+
+        _configure_pin_factory(probe_pin=23)
+    except Exception as exc:
+        log.warning("Pin factory setup for RS485 DE failed: %s", exc)
+
+
 class Rs485Vfd:
     """
-    Async Modbus RTU over /dev/serial0 (PL011 / ttyAMA0).
+    Async Modbus RTU over /dev/serial0 (PL011 hardware UART).
 
-    DE/RE for Waveshare SP3485: **hardware UART0 RTS0 on GPIO17** via pyserial
-    ``RS485Settings`` (kernel ``TIOCSRS485`` — RTS toggles with TX automatically).
+    DE/RE for Waveshare SP3485: **software GPIO** (default GPIO17), toggled around TX.
+    Do **not** set ``gpio=17=a3`` — pin must be ordinary GPIO, not RTS0 ALT3.
 
     Wiring: TX=GPIO14, RX=GPIO15, DE/RE=GPIO17.
-    config.txt: ``gpio=17=a3``, ``enable_uart=1``, ``dtoverlay=disable-bt``.
     """
 
     def __init__(
@@ -46,9 +55,39 @@ class Rs485Vfd:
         serial = serial or SerialConfig()
         vfd = vfd or VfdConfig()
 
-        self._de_ok = RS485Settings is not None
-        self._de_error = "" if self._de_ok else "serial.rs485.RS485Settings not available"
+        class _DummyDe:
+            def on(self) -> None: ...
+
+            def off(self) -> None: ...
+
+        self._de = _DummyDe()
+        self._de_ok = False
+        self._de_error = ""
+        self._de_timer: threading.Timer | None = None
         self._de_patched = False
+        self._de_pin = int(getattr(serial, "rs485_de", RS485_DE_GPIO) or RS485_DE_GPIO)
+
+        if DigitalOutputDevice is not None:
+            _ensure_pin_factory()
+            try:
+                self._de = DigitalOutputDevice(
+                    self._de_pin,
+                    active_high=bool(serial.rs485_active_high),
+                    initial_value=False,
+                )
+                self._de_ok = True
+                log.info(
+                    "RS485 DE on GPIO%s ready (software, active_high=%s)",
+                    self._de_pin,
+                    serial.rs485_active_high,
+                )
+            except Exception as exc:
+                self._de = _DummyDe()
+                self._de_error = f"{type(exc).__name__}: {exc}"
+                log.error("RS485 DE GPIO%s unavailable: %s", self._de_pin, self._de_error)
+        else:
+            self._de_error = "gpiozero.DigitalOutputDevice not importable"
+
         self._serial = serial
         self._vfd = vfd
         self._client = self._build_client()
@@ -58,12 +97,6 @@ class Rs485Vfd:
         self._last_reconnect_t = 0.0
         self._reconnect_period_s = float(serial.reconnect_period_s)
         self._fails_before_reconnect = max(1, int(serial.fails_before_reconnect))
-        if self._de_ok:
-            log.info(
-                "RS485 DE via UART RTS0 hardware (GPIO%s), active_high=%s",
-                RS485_RTS0_GPIO,
-                serial.rs485_active_high,
-            )
 
     def _build_client(self) -> AsyncModbusSerialClient:
         return AsyncModbusSerialClient(
@@ -74,6 +107,7 @@ class Rs485Vfd:
             bytesize=self._serial.bytesize,
             timeout=self._serial.timeout_s,
             retries=self._serial.retries,
+            trace_packet=self._trace_packet,
         )
 
     @property
@@ -92,103 +126,117 @@ class Rs485Vfd:
     def connected(self) -> bool:
         return self._client_alive()
 
-    def _get_serial_transport(self):
+    def _rx_mode(self) -> None:
+        try:
+            self._de.off()
+        except Exception:
+            pass
+
+    def _tx_mode(self) -> None:
+        try:
+            self._de.on()
+        except Exception:
+            pass
+
+    def _cancel_de_timer(self) -> None:
+        t = self._de_timer
+        self._de_timer = None
+        if t is not None:
+            try:
+                t.cancel()
+            except Exception:
+                pass
+
+    def _get_pyserial(self):
         ctx = getattr(self._client, "ctx", None)
         transport = getattr(ctx, "transport", None) if ctx is not None else None
         if transport is None:
             transport = getattr(self._client, "transport", None)
-        return transport
-
-    def _get_pyserial(self):
-        transport = self._get_serial_transport()
         if transport is not None:
             for name in ("serial", "_serial", "sync_serial"):
                 ser = getattr(transport, name, None)
                 if ser is not None and hasattr(ser, "write"):
                     return ser
-        ctx = getattr(self._client, "ctx", None)
-        if ctx is not None:
-            for name in ("comm", "socket", "_sock"):
-                obj = getattr(ctx, name, None)
-                if obj is not None and hasattr(obj, "rs485_mode"):
-                    return obj
-                if obj is not None:
-                    inner = getattr(obj, "serial", None) or getattr(obj, "_serial", None)
-                    if inner is not None and hasattr(inner, "write"):
-                        return inner
         return None
 
-    def _force_rx_idle(self) -> None:
-        """Best-effort idle RX after close / errors (hw mode may leave RTS high)."""
+    def _flush_rx(self) -> None:
         ser = self._get_pyserial()
         if ser is None:
             return
         try:
-            rx_level = not bool(self._serial.rs485_active_high)
-            ser.rts = rx_level
+            ser.reset_input_buffer()
         except Exception:
             pass
 
-    def _apply_uart_rts_hw(self) -> bool:
-        """Enable kernel/pyserial RS485 RTS auto-direction (GPIO17 = RTS0)."""
-        if RS485Settings is None:
-            self._de_error = "RS485Settings unavailable"
-            self._de_ok = False
-            return False
+    def _discard_tx_echo(self, nbytes: int) -> None:
+        ser = self._get_pyserial()
+        if ser is None or nbytes <= 0:
+            return
+        try:
+            n = int(getattr(ser, "in_waiting", 0) or 0)
+            if n <= 0:
+                return
+            junk = ser.read(min(n, int(nbytes)))
+            if junk:
+                log.debug("RS485 discarded %s echo byte(s)", len(junk))
+        except Exception:
+            pass
 
+    def _frame_time_s(self, nbytes: int) -> float:
+        baud = max(1.0, float(self._serial.baudrate))
+        return (max(0, int(nbytes)) * 10.0) / baud
+
+    def _switch_to_rx_after_tx(self, nbytes: int) -> None:
+        self._rx_mode()
+        time.sleep(0.001)
+        self._discard_tx_echo(int(nbytes))
+
+    def _arm_rx_after_tx(self, nbytes: int) -> None:
+        self._cancel_de_timer()
+        delay = (
+            self._frame_time_s(nbytes)
+            + float(self._serial.de_turnaround_s)
+            + 0.002
+        )
+        timer = threading.Timer(delay, self._switch_to_rx_after_tx, args=(nbytes,))
+        timer.daemon = True
+        self._de_timer = timer
+        timer.start()
+
+    def _trace_packet(self, sending: bool, data: bytes) -> bytes:
+        if sending and data:
+            self._flush_rx()
+            self._tx_mode()
+            before = float(self._serial.de_delay_before_tx_s)
+            if before > 0:
+                time.sleep(before)
+            self._arm_rx_after_tx(len(data))
+            self._de_patched = True
+        elif not sending:
+            self._cancel_de_timer()
+            self._rx_mode()
+        return data
+
+    def _disable_kernel_rs485(self) -> None:
+        """Ensure UART is not in RTS0 RS485 mode (would fight GPIO DE)."""
         ser = self._get_pyserial()
         if ser is None:
-            self._de_error = "pyserial handle not found after connect"
-            self._de_ok = False
-            log.error("RS485 %s: %s", DE_CONTROL_VERSION, self._de_error)
-            return False
-
-        active_high = bool(self._serial.rs485_active_high)
-        before = float(self._serial.de_delay_before_tx_s)
-        after = float(self._serial.de_turnaround_s)
+            return
+        try:
+            if hasattr(ser, "rs485_mode"):
+                ser.rs485_mode = None
+        except Exception:
+            pass
         try:
             if hasattr(ser, "rtscts"):
                 ser.rtscts = False
-            settings = RS485Settings(
-                rts_level_for_tx=active_high,
-                rts_level_for_rx=not active_high,
-                loopback=False,
-                delay_before_tx=before if before > 0 else None,
-                delay_before_rx=after if after > 0 else None,
-            )
-            ser.rs485_mode = settings
-            # Ensure idle is RX after enabling mode.
-            try:
-                ser.rts = not active_high
-            except Exception:
-                pass
-            self._de_ok = True
-            self._de_patched = True
-            self._de_error = ""
-            log.info(
-                "RS485 %s: hardware RTS0 DE enabled "
-                "(GPIO%s, rts_tx=%s delay_tx=%.3f delay_rx=%.3f)",
-                DE_CONTROL_VERSION,
-                RS485_RTS0_GPIO,
-                active_high,
-                before,
-                after,
-            )
-            return True
-        except Exception as exc:
-            self._de_ok = False
-            self._de_error = f"{type(exc).__name__}: {exc}"
-            log.error(
-                "RS485 %s: failed to set rs485_mode (RTS0): %s — "
-                "check gpio=17=a3 in config.txt and DE wired to GPIO17",
-                DE_CONTROL_VERSION,
-                self._de_error,
-            )
-            return False
+        except Exception:
+            pass
 
     async def connect(self) -> None:
         if self._connected and bool(getattr(self._client, "connected", False)):
             return
+        self._rx_mode()
         try:
             await self._client.connect()
         except Exception as exc:
@@ -198,21 +246,23 @@ class Rs485Vfd:
         self._connected = bool(getattr(self._client, "connected", False))
         if self._connected:
             self._fail_count = 0
-            self._apply_uart_rts_hw()
+            self._disable_kernel_rs485()
+            self._rx_mode()
             log.info(
-                "Modbus connected %s: port=%s baud=%s unit=%s de_ok=%s de_hw=%s",
+                "Modbus connected %s: port=%s baud=%s unit=%s de_ok=%s de_gpio=%s",
                 DE_CONTROL_VERSION,
                 self._serial.port,
                 self._serial.baudrate,
                 self._unit_id,
                 self._de_ok,
-                self._de_patched,
+                self._de_pin,
             )
         else:
             log.error("Modbus connect failed: port=%s", self._serial.port)
 
     async def close(self) -> None:
-        self._force_rx_idle()
+        self._cancel_de_timer()
+        self._rx_mode()
         try:
             self._client.close()
         except Exception:
@@ -294,6 +344,8 @@ class Rs485Vfd:
                 log.debug("Modbus optional read error addr=0x%04X: %s", address, exc)
                 return None
             raise
+        finally:
+            self._rx_mode()
 
         if rr.isError():
             if optional:
@@ -339,6 +391,8 @@ class Rs485Vfd:
             log.warning("Modbus write error: %s", exc)
             self._note_failure()
             return False
+        finally:
+            self._rx_mode()
 
     async def read_status(self) -> dict:
         if not await self.ensure_connected():
@@ -362,6 +416,8 @@ class Rs485Vfd:
             log.warning("Modbus read error: %s", exc)
             self._note_failure()
             return {}
+        finally:
+            self._rx_mode()
 
         freq_out_hz = (
             float(freq_out_raw) / float(self._vfd.freq_scale)

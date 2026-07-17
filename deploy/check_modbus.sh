@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Check RS485 Modbus RTU link to the VFD (uses settings.json).
+# Hardware UART (serial0) + software GPIO DE.
 set -euo pipefail
 
 VENV_PATH="${VENV_PATH:-/home/rolexs/brk}"
 PYTHON="${PYTHON:-$VENV_PATH/bin/python}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export GPIOZERO_PIN_FACTORY="${GPIOZERO_PIN_FACTORY:-lgpio}"
 
 echo "=== Brakovka Modbus check ==="
 echo "python: $PYTHON"
@@ -30,6 +32,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, ".")
+os.environ.setdefault("GPIOZERO_PIN_FACTORY", "lgpio")
 
 # Avoid stale .pyc from an older modbus_rs485.py
 import brakovka_pi.modbus_rs485 as modbus_mod
@@ -39,7 +42,7 @@ if not hasattr(modbus_mod, "DE_CONTROL_VERSION"):
     print("ERROR: на Pi старый modbus_rs485.py (нет DE_CONTROL_VERSION). Скопируйте файл с ПК.")
     sys.exit(5)
 
-from brakovka_pi.config import RS485_RTS0_GPIO, load_runtime_config
+from brakovka_pi.config import RS485_DE_GPIO, load_runtime_config
 from brakovka_pi.modbus_rs485 import Rs485Vfd, VfdCommand
 
 emu, gpio_cfg, serial_cfg, vfd_cfg, *_rest = load_runtime_config()
@@ -48,7 +51,7 @@ print("settings emulator flag:", emu)
 print(
     f"serial: port={serial_cfg.port} baud={serial_cfg.baudrate} "
     f"parity={serial_cfg.parity} stop={serial_cfg.stopbits} "
-    f"unit_id={serial_cfg.unit_id} DE=UART RTS0 HW GPIO{RS485_RTS0_GPIO} "
+    f"unit_id={serial_cfg.unit_id} DE=GPIO{serial_cfg.rs485_de} software "
     f"active_high={serial_cfg.rs485_active_high}"
 )
 print(
@@ -56,6 +59,7 @@ print(
     f"freq={vfd_cfg.reg_freq} status={vfd_cfg.reg_status} fault={vfd_cfg.reg_fault} "
     f"freq_out={vfd_cfg.reg_freq_out} scale={vfd_cfg.freq_scale}"
 )
+print("NOTE: GPIO17 must be normal GPIO (NOT RTS0). Remove gpio=17=a3 from config.txt if present.")
 
 port = Path(serial_cfg.port)
 if port.is_symlink():
@@ -70,7 +74,6 @@ if port.is_symlink():
             "    enable_uart=1\n"
             "    dtparam=uart0=on\n"
             "    dtoverlay=disable-bt\n"
-            "    gpio=17=a3\n"
             "  Then: sudo reboot\n"
             "  Expect: /dev/serial0 -> ttyAMA0"
         )
@@ -91,10 +94,10 @@ async def main() -> int:
         )
         return 5
 
-    print(f"\nDE: UART RTS0 HARDWARE GPIO{RS485_RTS0_GPIO} ok={de_ok} error={de_err or '(none)'}")
+    print(f"\nDE: software GPIO{RS485_DE_GPIO} ok={de_ok} error={de_err or '(none)'}")
     if not de_ok:
-        print("CRITICAL: RS485Settings / RTS0 not ready.")
-        print("  Ensure gpio=17=a3 in config.txt and DE wired to GPIO17.")
+        print("CRITICAL: GPIO DE not ready.")
+        print("  Stop app (pkill -f run_brakovka), check DE on GPIO17, pinctrl get 17 (not RTS0).")
 
     print("\n1) connect ...")
     await vfd.connect()
@@ -102,21 +105,13 @@ async def main() -> int:
         print("FAIL: Modbus connect() did not open the port")
         return 3
     print("OK: port open")
-    print(f"DE hardware rs485_mode: {getattr(vfd, 'de_patched', False)}")
-    if not getattr(vfd, "de_patched", False):
-        print("WARN: rs485_mode failed — RX likely broken")
-        print("  Check: gpio=17=a3, DE on GPIO17, pinctrl get 17 → RTS0")
-    ser = vfd._get_pyserial()
-    if ser is not None:
-        print(f"idle RTS={int(bool(ser.rts))} (expect 0 if active_high TX)")
+    print(f"DE gpio ready: {getattr(vfd, 'de_patched', False)}")
 
     print("\n2) read status/fault holding registers ...")
     st = await vfd.read_status()
     if not st:
         print("FAIL: no response from slave")
-        print("Checklist: A/B, GND, baud/addr, RTS0 HW, after TX RTS must return to RX")
-        if ser is not None:
-            print(f"RTS after fail={int(bool(ser.rts))}")
+        print("Checklist: A/B, GND, baud/unit_id, DE on GPIO17 (software), remove gpio=17=a3")
         await vfd.close()
         return 4
 

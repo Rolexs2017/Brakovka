@@ -5,7 +5,7 @@
 - Управление:
   - **Кнопки**: GPIO `23, 24, 25, 8, 7` (активный LOW, pull-up)
   - **Частотный преобразователь намотки**: **RS485 Modbus RTU** через `/dev/serial0`
-    - `TX=GPIO14`, `RX=GPIO15`, `DE/RE=GPIO17` (**UART0 RTS0**)
+    - `TX=GPIO14`, `RX=GPIO15`, `DE/RE=GPIO17` (**аппаратный UART + программный GPIO DE**)
   - **PWM тормоз размотки**: GPIO `13`
 - Взаимодействие с HMI/SCADA: **OPC‑UA server** (DWIN отсутствует)
 
@@ -33,15 +33,14 @@ ls -l /dev/serial0
 enable_uart=1
 dtparam=uart0=on
 dtoverlay=disable-bt
-gpio=17=a3
 ```
 
-`gpio=17=a3` включает **RTS0** на GPIO17 для DE/RE преобразователя RS485.
+**Не** добавляйте `gpio=17=a3` — GPIO17 должен быть обычным GPIO для программного DE, не RTS0.
 Проверка после reboot:
 
 ```bash
 pinctrl get 17
-# ожидается: ... func=RTS0
+# ожидается: ... func=OUTPUT или INPUT (не RTS0)
 ```
 
 Затем `sudo reboot`. Mini-UART на 115200 часто даёт «connected, но нет ответа» на Modbus.
@@ -330,11 +329,11 @@ PID рассчитывает **частоту для частотника в Hz*
 
 Кнопки ожидаются как **активный LOW** (подтяжка вверх).
 
-**RS485 DE/RE** — **аппаратный UART0 RTS0 на GPIO17** через `serial.rs485.RS485Settings`
-(ядро `TIOCSRS485` поднимает RTS на TX и опускает для RX).
+**RS485 DE/RE** — **аппаратный UART** (GPIO14/15) + **программный GPIO DE** на GPIO17
+(`gpiozero.DigitalOutputDevice`, версия `v10-uart-hw-gpio-de`).
 Полярность: `serial.rs485_active_high` (по умолчанию `true` = HIGH на TX).
 Проводка: DI←GPIO14, RO→GPIO15, RSE←GPIO17.
 
-В `config.txt` обязательно: `gpio=17=a3` (иначе GPIO17 не RTS0).
-Если после TX RTS остаётся в 1 — типичный баг PL011; проверьте `pinctrl get 17`.
+В `config.txt` **не** должно быть `gpio=17=a3` (иначе пин станет RTS0 и программный DE не сработает).
+Пин в `settings.json`: `serial.rs485_de` (по умолчанию `17`).
 
