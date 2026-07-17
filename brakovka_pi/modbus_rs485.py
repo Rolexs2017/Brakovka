@@ -17,8 +17,8 @@ from .config import RS485_DE_GPIO, SerialConfig, VfdConfig
 
 log = logging.getLogger(__name__)
 
-# Hardware UART TX/RX + software GPIO DE (not UART RTS0).
-DE_CONTROL_VERSION = "v10-uart-hw-gpio-de"
+# UART+GPIO DE or USB RS485 (auto DE when rs485_de is null).
+DE_CONTROL_VERSION = "v11-usb-or-gpio-de"
 
 
 @dataclass
@@ -39,11 +39,10 @@ def _ensure_pin_factory() -> None:
 
 class Rs485Vfd:
     """
-    Async Modbus RTU over /dev/serial0 (PL011 hardware UART).
+    Async Modbus RTU over serial port.
 
-    DE/RE for Waveshare SP3485: **software GPIO** (default GPIO16), toggled around TX.
-
-    Wiring: TX=GPIO14, RX=GPIO15, DE/RE=GPIO16.
+    * **USB RS485** (``rs485_de: null``): adapter auto-switches DE; no GPIO.
+    * **SP3485 on GPIO14/15/16**: software DE on ``rs485_de`` (default GPIO16).
     """
 
     def __init__(
@@ -64,28 +63,34 @@ class Rs485Vfd:
         self._de_error = ""
         self._de_timer: threading.Timer | None = None
         self._de_patched = False
-        self._de_pin = int(getattr(serial, "rs485_de", RS485_DE_GPIO) or RS485_DE_GPIO)
+        raw_de = getattr(serial, "rs485_de", RS485_DE_GPIO)
+        self._de_pin: int | None = int(raw_de) if raw_de is not None and int(raw_de) > 0 else None
+        self._use_gpio_de = self._de_pin is not None
 
-        if DigitalOutputDevice is not None:
-            _ensure_pin_factory()
-            try:
-                self._de = DigitalOutputDevice(
-                    self._de_pin,
-                    active_high=bool(serial.rs485_active_high),
-                    initial_value=False,
-                )
-                self._de_ok = True
-                log.info(
-                    "RS485 DE on GPIO%s ready (software, active_high=%s)",
-                    self._de_pin,
-                    serial.rs485_active_high,
-                )
-            except Exception as exc:
-                self._de = _DummyDe()
-                self._de_error = f"{type(exc).__name__}: {exc}"
-                log.error("RS485 DE GPIO%s unavailable: %s", self._de_pin, self._de_error)
+        if self._use_gpio_de:
+            if DigitalOutputDevice is not None:
+                _ensure_pin_factory()
+                try:
+                    self._de = DigitalOutputDevice(
+                        self._de_pin,
+                        active_high=bool(serial.rs485_active_high),
+                        initial_value=False,
+                    )
+                    self._de_ok = True
+                    log.info(
+                        "RS485 DE on GPIO%s ready (software, active_high=%s)",
+                        self._de_pin,
+                        serial.rs485_active_high,
+                    )
+                except Exception as exc:
+                    self._de = _DummyDe()
+                    self._de_error = f"{type(exc).__name__}: {exc}"
+                    log.error("RS485 DE GPIO%s unavailable: %s", self._de_pin, self._de_error)
+            else:
+                self._de_error = "gpiozero.DigitalOutputDevice not importable"
         else:
-            self._de_error = "gpiozero.DigitalOutputDevice not importable"
+            self._de_ok = True
+            log.info("RS485 USB/auto DE on %s (no GPIO)", serial.port)
 
         self._serial = serial
         self._vfd = vfd
@@ -98,7 +103,7 @@ class Rs485Vfd:
         self._fails_before_reconnect = max(1, int(serial.fails_before_reconnect))
 
     def _build_client(self) -> AsyncModbusSerialClient:
-        return AsyncModbusSerialClient(
+        kwargs: dict = dict(
             port=self._serial.port,
             baudrate=self._serial.baudrate,
             parity=self._serial.parity,
@@ -106,8 +111,10 @@ class Rs485Vfd:
             bytesize=self._serial.bytesize,
             timeout=self._serial.timeout_s,
             retries=self._serial.retries,
-            trace_packet=self._trace_packet,
         )
+        if self._use_gpio_de:
+            kwargs["trace_packet"] = self._trace_packet
+        return AsyncModbusSerialClient(**kwargs)
 
     @property
     def de_ok(self) -> bool:
@@ -126,12 +133,16 @@ class Rs485Vfd:
         return self._client_alive()
 
     def _rx_mode(self) -> None:
+        if not self._use_gpio_de:
+            return
         try:
             self._de.off()
         except Exception:
             pass
 
     def _tx_mode(self) -> None:
+        if not self._use_gpio_de:
+            return
         try:
             self._de.on()
         except Exception:
@@ -248,13 +259,13 @@ class Rs485Vfd:
             self._disable_kernel_rs485()
             self._rx_mode()
             log.info(
-                "Modbus connected %s: port=%s baud=%s unit=%s de_ok=%s de_gpio=%s",
+                "Modbus connected %s: port=%s baud=%s unit=%s de_mode=%s de_ok=%s",
                 DE_CONTROL_VERSION,
                 self._serial.port,
                 self._serial.baudrate,
                 self._unit_id,
+                f"GPIO{self._de_pin}" if self._use_gpio_de else "USB/auto",
                 self._de_ok,
-                self._de_pin,
             )
         else:
             log.error("Modbus connect failed: port=%s", self._serial.port)

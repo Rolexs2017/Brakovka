@@ -4,8 +4,9 @@
 
 - Управление:
   - **Кнопки**: GPIO `23, 24, 25, 8, 7` (активный LOW, pull-up)
-  - **Частотный преобразователь намотки**: **RS485 Modbus RTU** через `/dev/serial0`
-    - `TX=GPIO14`, `RX=GPIO15`, `DE/RE=GPIO16` (**аппаратный UART + программный GPIO DE**)
+  - **Частотный преобразователь намотки**: **RS485 Modbus RTU**
+    - **USB‑адаптер** (рекомендуется): `/dev/ttyUSB0` или `/dev/serial/by-id/...`, `rs485_de: null`
+    - **или** onboard UART: `TX=GPIO14`, `RX=GPIO15`, `DE/RE=GPIO16` (программный DE)
   - **PWM тормоз размотки**: GPIO `13`
 - Взаимодействие с HMI/SCADA: **OPC‑UA server** (DWIN отсутствует)
 
@@ -281,6 +282,44 @@ PID рассчитывает **частоту для частотника в Hz*
 На ПЧ: `Pr.00-20` = источник частоты RS‑485, `Pr.00-21` = команды RS‑485;
 `Pr.09-00` — адрес slave (`serial.unit_id`), `Pr.09-01` — baud.
 
+### USB RS485 (рекомендуется на Pi)
+
+1. Подключите USB‑адаптер, найдите порт:
+
+```bash
+bash deploy/list_serial_ports.sh
+```
+
+2. В `brakovka_pi/settings.json`:
+
+```json
+"serial": {
+  "port": "/dev/serial/by-id/usb-ВАШ_АДАПТЕР-if00-port0",
+  "baudrate": 115200,
+  "unit_id": 1,
+  "rs485_de": null,
+  "de_delay_before_tx_s": 0,
+  "de_turnaround_s": 0
+}
+```
+
+`rs485_de: null` — **без GPIO DE** (автопереключение в адаптере).
+
+3. Права (один раз):
+
+```bash
+sudo usermod -aG dialout rolexs
+# перелогиниться
+```
+
+4. Проверка:
+
+```bash
+pkill -f run_brakovka.py || true
+bash deploy/check_modbus_raw.sh
+bash deploy/check_modbus.sh
+```
+
 `VfdStatusWord/VfdErrorCode` публикуются в OPC‑UA.
 
 ## OPC‑UA API (структура узлов)
@@ -328,10 +367,10 @@ PID рассчитывает **частоту для частотника в Hz*
 
 Кнопки ожидаются как **активный LOW** (подтяжка вверх).
 
-**RS485 DE/RE** — **аппаратный UART** (GPIO14/15) + **программный GPIO DE** на GPIO16
-(`gpiozero.DigitalOutputDevice`, версия `v10-uart-hw-gpio-de`).
-Полярность: `serial.rs485_active_high` (по умолчанию `true` = HIGH на TX).
-Проводка: DI←GPIO14, RO→GPIO15, RSE←GPIO16.
+**RS485 — два варианта**
 
-Пин в `settings.json`: `serial.rs485_de` (по умолчанию `16`).
+1. **USB‑адаптер** (`rs485_de: null`): только A/B и GND к ПЧ; DE внутри адаптера.
+2. **SP3485 на GPIO** (`rs485_de: 16`): DI←14, RO→15, RSE←16; полярность `rs485_active_high`.
+
+Пин DE в `settings.json`: `serial.rs485_de` — число GPIO или `null` для USB.
 
