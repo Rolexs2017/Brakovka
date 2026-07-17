@@ -330,10 +330,10 @@ PID рассчитывает **частоту для частотника в Hz*
 
 Кнопки ожидаются как **активный LOW** (подтяжка вверх).
 
-**RS485 DE/RE** — только **UART0 RTS0 на GPIO17**. Ядро/pyserial поднимает RTS
-на время TX и опускает для RX (`serial.rs485.RS485Settings`).
-Проводка: DI←GPIO14, RO→GPIO15, RSE←GPIO17.
-Полярность: `serial.rs485_active_high` в `settings.json` (по умолчанию `true`).
+**RS485 DE/RE** — **UART0 RTS0 на GPIO17**, переключение **программное** (`serial.rts`):
+TX → RTS на уровень передачи, после кадра → RTS на приём (idle всегда RX).
+Полярность: `serial.rs485_active_high` (по умолчанию `true` = HIGH на TX).
+Kernel `rs485_mode` на PL011 не используется — на Pi часто оставляет RTS в единице.
 
 В `config.txt` обязательно: `gpio=17=a3` (иначе GPIO17 не RTS0).
 

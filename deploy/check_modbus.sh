@@ -48,7 +48,7 @@ print("settings emulator flag:", emu)
 print(
     f"serial: port={serial_cfg.port} baud={serial_cfg.baudrate} "
     f"parity={serial_cfg.parity} stop={serial_cfg.stopbits} "
-    f"unit_id={serial_cfg.unit_id} DE=UART RTS0 GPIO{RS485_RTS0_GPIO} "
+    f"unit_id={serial_cfg.unit_id} DE=UART RTS0 soft GPIO{RS485_RTS0_GPIO} "
     f"active_high={serial_cfg.rs485_active_high}"
 )
 print(
@@ -91,10 +91,10 @@ async def main() -> int:
         )
         return 5
 
-    print(f"\nDE: UART RTS0 GPIO{RS485_RTS0_GPIO} ok={de_ok} error={de_err or '(none)'}")
+    print(f"\nDE: UART RTS0 soft GPIO{RS485_RTS0_GPIO} ok={de_ok} error={de_err or '(none)'}")
     if not de_ok:
-        print("CRITICAL: RS485Settings unavailable — half-duplex usually cannot receive.")
-        print("  Ensure pyserial is installed and gpio=17=a3 in config.txt.")
+        print("CRITICAL: RTS control not ready.")
+        print("  Ensure gpio=17=a3 in config.txt and DE wired to GPIO17.")
 
     print("\n1) connect ...")
     await vfd.connect()
@@ -102,16 +102,22 @@ async def main() -> int:
         print("FAIL: Modbus connect() did not open the port")
         return 3
     print("OK: port open")
-    print(f"DE RTS0 enabled: {getattr(vfd, 'de_patched', False)}")
+    print(f"DE soft RTS ready: {getattr(vfd, 'de_patched', False)}")
     if not getattr(vfd, "de_patched", False):
-        print("WARN: rs485_mode failed — RX likely broken on half-duplex RS485")
-        print("  Check: gpio=17=a3, DE wired to GPIO17, pinctrl get 17 → RTS0")
+        print("WARN: RTS control failed — RX likely broken")
+        print("  Check: gpio=17=a3, DE on GPIO17, pinctrl get 17 → RTS0")
+    # Idle must be RX (RTS=0 when active_high TX).
+    ser = vfd._get_pyserial()
+    if ser is not None:
+        print(f"idle RTS={int(bool(ser.rts))} (expect 0 if active_high TX)")
 
     print("\n2) read status/fault holding registers ...")
     st = await vfd.read_status()
     if not st:
         print("FAIL: no response from slave")
-        print("Checklist: swap A/B, GND, VFD baud/addr/RTU, RTS0, not ttyS0 if unstable")
+        print("Checklist: swap A/B, GND, VFD baud/addr/RTU, RTS idle=RX, not ttyS0")
+        if ser is not None:
+            print(f"RTS after fail={int(bool(ser.rts))}")
         await vfd.close()
         return 4
 
@@ -127,6 +133,11 @@ async def main() -> int:
     print("after STOP:", st2 or "no response")
 
     await vfd.close()
+    if ser is not None:
+        try:
+            print(f"final RTS after close attempt (port closed)")
+        except Exception:
+            pass
     print("\nSUCCESS: Modbus RTU path looks alive")
     return 0
 
