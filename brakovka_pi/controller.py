@@ -12,7 +12,9 @@ from .config import load_runtime_config, resolve_emulator
 from .encoder import (
     Encoder,
     PID_REGULATOR_SPEED_MEDIAN_N,
+    SPEED_DISPLAY_TAU_S,
     SPEED_LENGTH_WINDOW_S,
+    SpeedDisplayFilter,
     SpeedFromLengthWindow,
     SpeedMedianFilter,
     SpeedOutlierReject,
@@ -222,6 +224,7 @@ async def run_controller(
         speed_window = SpeedFromLengthWindow(SPEED_LENGTH_WINDOW_S)
         speed_median = SpeedMedianFilter(PID_REGULATOR_SPEED_MEDIAN_N)
         speed_outlier = SpeedOutlierReject(max_mpm=m.params.max_ramp_speed_mpm)
+        speed_display = SpeedDisplayFilter(SPEED_DISPLAY_TAU_S)
         last_speed_mpm = 0.0
 
         p_task = _Periodic(timing_cfg.task_period_s)
@@ -297,6 +300,7 @@ async def run_controller(
                     speed_window.reset(0.0)
                     speed_median.reset(0.0)
                     speed_outlier.reset(0.0)
+                    speed_display.reset(0.0)
                     machine_log.info(
                         "Reset roll: length=%.0f m diameter=%.0f mm remaining=%.1f m",
                         m.params.unwind_roll_length_m,
@@ -309,6 +313,7 @@ async def run_controller(
                     speed_window.reset(0.0)
                     speed_median.reset(0.0)
                     speed_outlier.reset(0.0)
+                    speed_display.reset(0.0)
                     machine_log.info("Reset wound length")
 
                 if inp.start_pulse:
@@ -374,7 +379,8 @@ async def run_controller(
 
                 clean_mpm = speed_outlier.update(last_speed_mpm)
                 actual_mpm = speed_median.update(clean_mpm)
-                m.telem.speed_mpm = actual_mpm
+                # HMI/OPC: stronger low-pass; PID keeps actual_mpm.
+                m.telem.speed_mpm = speed_display.update(actual_mpm, ctrl_dt)
                 stopping = state == MachineState.STOPPING
 
                 # --- PID autotune or normal ramp+PID ---

@@ -6,7 +6,9 @@ import unittest
 
 from brakovka_pi.encoder import (
     PID_REGULATOR_SPEED_MEDIAN_N,
+    SPEED_DISPLAY_TAU_S,
     SPEED_LENGTH_WINDOW_S,
+    SpeedDisplayFilter,
     SpeedFromLengthWindow,
     SpeedMedianFilter,
 )
@@ -55,6 +57,28 @@ class TestSpeedMedianFilter(unittest.TestCase):
         filt.reset(0.0)
         self.assertEqual(filt.value_mpm, 0.0)
         self.assertAlmostEqual(filt.update(20.0), 20.0, places=6)
+
+
+class TestSpeedDisplayFilter(unittest.TestCase):
+    def test_tau_constant(self) -> None:
+        self.assertAlmostEqual(SPEED_DISPLAY_TAU_S, 0.5, places=6)
+
+    def test_smooths_step(self) -> None:
+        filt = SpeedDisplayFilter(tau_s=0.5)
+        self.assertAlmostEqual(filt.update(0.0, 0.01), 0.0, places=6)
+        # After a step, value moves toward target but not instantly
+        v = filt.update(60.0, 0.01)
+        self.assertGreater(v, 0.0)
+        self.assertLess(v, 10.0)
+        for _ in range(400):
+            v = filt.update(60.0, 0.01)
+        self.assertAlmostEqual(v, 60.0, delta=0.5)
+
+    def test_reset(self) -> None:
+        filt = SpeedDisplayFilter(0.5)
+        filt.update(50.0, 0.01)
+        filt.reset(0.0)
+        self.assertAlmostEqual(filt.update(10.0, 0.01), 10.0, places=6)
 
 
 if __name__ == "__main__":

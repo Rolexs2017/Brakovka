@@ -154,9 +154,39 @@ class SpeedMedianFilter:
         return self.value_mpm
 
 
-# Length window for ΔL/Δt, then median before PID / HMI (controller).
+class SpeedDisplayFilter:
+    """
+    Extra 1st-order low-pass for HMI / OPC telemetry only.
+
+    Does not feed PID — keeps regulator responsive while the on-screen
+    speed value is heavily smoothed.
+    """
+
+    def __init__(self, tau_s: float = 0.5) -> None:
+        self._tau_s = max(0.05, float(tau_s))
+        self.value_mpm = 0.0
+        self._primed = False
+
+    def reset(self, value_mpm: float = 0.0) -> None:
+        self.value_mpm = max(0.0, float(value_mpm))
+        self._primed = False
+
+    def update(self, raw_mpm: float, dt_s: float) -> float:
+        raw = max(0.0, float(raw_mpm))
+        if not self._primed:
+            self._primed = True
+            self.value_mpm = raw
+            return self.value_mpm
+        dt = max(1e-4, min(float(dt_s), 0.5))
+        alpha = dt / (self._tau_s + dt)
+        self.value_mpm += (raw - self.value_mpm) * alpha
+        return self.value_mpm
+
+
+# Length window for ΔL/Δt, then median before PID; display EMA for HMI.
 SPEED_LENGTH_WINDOW_S = 0.1
 PID_REGULATOR_SPEED_MEDIAN_N = 11
+SPEED_DISPLAY_TAU_S = 0.5
 
 
 class Encoder:
