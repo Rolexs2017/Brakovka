@@ -95,7 +95,7 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
 
     from brakovka_hmi.bridge import LocalBridge
-    from brakovka_hmi.ui.main_window import MainWindow
+    from brakovka_hmi.ui.gui import create_main_window, resolve_gui_variant
     from brakovka_pi.settings import load_settings
 
     ui_cfg = load_settings().ui
@@ -140,12 +140,15 @@ def main() -> int:
         base_font.setPointSize(10)
     app.setFont(base_font)
 
-    window = MainWindow(
+    log.info("HMI variant: %s", resolve_gui_variant(ui_cfg))
+
+    window = create_main_window(
         bridge,
         title=ui_title,
         width=ui_width,
         height=ui_height,
         fullscreen=ui_fullscreen,
+        ui_cfg=ui_cfg,
     )
     window.show_for_display()
 

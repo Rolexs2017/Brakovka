@@ -28,6 +28,7 @@
   "ui": {
     "window_title": "Brakovka HMI",
     "fullscreen": true,
+    "gui_variant": "modern",
     "settings_password": "4444",
     "sounds_enabled": true
   },
