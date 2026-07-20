@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from brakovka_hmi.snapshot import MachineSnapshot, StatusFlag
 from brakovka_hmi.ui.modern import icons as ic
 from brakovka_hmi.ui.modern import theme as t
+from brakovka_hmi.ui.modern.semantics import flag_chip_level, machine_state_level, snapshot_level
 from brakovka_hmi.ui.modern.widgets import FlagChip, PageBar, SettingsTile, StatCard
 
 PAGE_HUB = 0
@@ -46,11 +47,12 @@ _PAGE_TITLES = {
 class StatusScreen(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._lamps: list[tuple[StatusFlag, FlagChip]] = []
+        self._lamps: list[tuple[StatusFlag, FlagChip, bool]] = []
         self._gpio_lamps: dict[str, FlagChip] = {}
         self._last_gpio_hint = ""
         self._last_gpio_pins: tuple[int, int, int, int, int] | None = None
         self._last_state_name = ""
+        self._last_level = "neutral"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -168,7 +170,7 @@ class StatusScreen(QWidget):
         cols = 2
         for i, (bit, icon_name, label, alarm) in enumerate(STATUS_ITEMS):
             chip = FlagChip(icon_name, label, alarm=alarm)
-            self._lamps.append((bit, chip))
+            self._lamps.append((bit, chip, alarm))
             grid.addWidget(chip, i // cols, i % cols)
         lay.addLayout(grid)
         lay.addStretch()
@@ -209,13 +211,17 @@ class StatusScreen(QWidget):
         self._bar.set_title(_PAGE_TITLES.get(index, "Статус"))
         self._btn_back.setVisible(index != PAGE_HUB)
         if self._last_state_name:
-            self._bar.set_badge(self._last_state_name)
+            self._bar.set_badge(self._last_state_name, self._last_level)
 
     def update_snapshot(self, snap: MachineSnapshot) -> None:
         self._last_state_name = snap.state_name
-        self._bar.set_badge(snap.state_name)
+        level = snapshot_level(snap)
+        self._last_level = level
+        self._bar.set_badge(snap.state_name, level)
 
+        state_level = machine_state_level(snap.state)
         self._state.set_value(snap.state_name)
+        self._state.set_level(state_level)
         self._speed.set_value(f"{snap.speed_mpm:.1f}")
         self._motor.set_value(f"{snap.motor_cmd_rpm:.1f}")
         self._brake.set_value(f"{snap.brake_pct:.1f}")
@@ -224,8 +230,9 @@ class StatusScreen(QWidget):
         self._enc_pulses.set_value(f"{snap.encoder_pulses}")
 
         flags = snap.status_flags
-        for bit, chip in self._lamps:
-            chip.set_active(bool(flags & bit))
+        for bit, chip, alarm in self._lamps:
+            active = bool(flags & bit)
+            chip.set_chip_level(flag_chip_level(bit, active, alarm=alarm))
 
         pins = (
             snap.gpio_pin_start,
@@ -256,10 +263,12 @@ class StatusScreen(QWidget):
             self._last_gpio_hint = hint
             self._gpio_hint.setText(hint)
 
-        self._gpio_lamps["start"].set_active(snap.gpio_available and snap.gpio_start)
-        self._gpio_lamps["stop"].set_active(snap.gpio_available and snap.gpio_stop)
-        self._gpio_lamps["jog"].set_active(snap.gpio_available and snap.gpio_jog)
-        self._gpio_lamps["reverse"].set_active(snap.gpio_available and snap.gpio_reverse)
-        self._gpio_lamps["reset_wound"].set_active(
-            snap.gpio_available and snap.gpio_reset_wound
+        self._gpio_lamps["start"].set_chip_level("ok" if snap.gpio_available and snap.gpio_start else "off")
+        self._gpio_lamps["stop"].set_chip_level("ok" if snap.gpio_available and snap.gpio_stop else "off")
+        self._gpio_lamps["jog"].set_chip_level("ok" if snap.gpio_available and snap.gpio_jog else "off")
+        self._gpio_lamps["reverse"].set_chip_level(
+            "ok" if snap.gpio_available and snap.gpio_reverse else "off"
+        )
+        self._gpio_lamps["reset_wound"].set_chip_level(
+            "ok" if snap.gpio_available and snap.gpio_reset_wound else "off"
         )

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from brakovka_hmi.bridge import LocalBridge
 from brakovka_hmi.snapshot import CmdBit, MachineSnapshot
+from brakovka_hmi.ui.modern.semantics import snapshot_level
 from brakovka_hmi.ui.modern.widgets import CmdButton, HeroCard, PageBar, StatCard
 
 
@@ -49,10 +50,10 @@ class MainScreen(QWidget):
 
         cmd_row = QHBoxLayout()
         cmd_row.setSpacing(10)
-        self._btn_start = CmdButton("play", "Пуск", accent=True)
-        self._btn_jog = CmdButton("jog", "Jog")
-        self._btn_rev = CmdButton("reverse", "Реверс")
-        self._btn_stop = CmdButton("stop", "Стоп", danger=True)
+        self._btn_start = CmdButton("play", "Пуск", variant="ok")
+        self._btn_jog = CmdButton("jog", "Jog", variant="warn")
+        self._btn_rev = CmdButton("reverse", "Реверс", variant="warn")
+        self._btn_stop = CmdButton("stop", "Стоп", variant="alarm")
         for btn in (self._btn_start, self._btn_jog, self._btn_rev, self._btn_stop):
             cmd_row.addWidget(btn, stretch=1)
         root.addLayout(cmd_row)
@@ -76,7 +77,9 @@ class MainScreen(QWidget):
         root.addStretch()
 
     def update_snapshot(self, snap: MachineSnapshot) -> None:
-        self._bar.set_badge(snap.state_name)
+        level = snapshot_level(snap)
+        self._bar.set_badge(snap.state_name, level)
+        self._hero.set_level(level)
         self._hero.set_value(f"{snap.speed_mpm:.1f}")
         self._diameter.set_value(f"{snap.diameter_mm:.0f}")
         self._wound.set_value(f"{snap.wound_m:.1f}")

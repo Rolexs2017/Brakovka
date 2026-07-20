@@ -21,6 +21,12 @@ _ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 _LOGO_H = 32
 
 
+def _apply_prop(widget, name: str, value) -> None:
+    widget.setProperty(name, value)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+
+
 def _logo(filename: str) -> QLabel:
     label = QLabel()
     path = _ASSETS / filename
@@ -104,17 +110,49 @@ def build_stylesheet() -> str:
     #stateBadge {{
         font-size: 10pt;
         font-weight: 700;
+        border-radius: 999px;
+        padding: 6px 16px;
+    }}
+    #stateBadge[statusLevel="ok"] {{
+        color: {t.SUCCESS};
+        background: {t.SUCCESS_BG};
+        border: 1px solid {t.SUCCESS_BORDER};
+    }}
+    #stateBadge[statusLevel="warn"] {{
+        color: {t.WARN};
+        background: {t.WARN_BG};
+        border: 1px solid {t.WARN_BORDER};
+    }}
+    #stateBadge[statusLevel="alarm"] {{
+        color: {t.ERROR};
+        background: {t.ERROR_BG};
+        border: 1px solid {t.ERROR_BORDER};
+    }}
+    #stateBadge[statusLevel="neutral"] {{
         color: {t.ACCENT};
         background: {t.ACCENT_GLOW};
         border: 1px solid rgba(34, 211, 238, 0.35);
-        border-radius: 999px;
-        padding: 6px 16px;
     }}
     QFrame#heroCard {{
         background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
             stop:0 {t.SURFACE_RAISED}, stop:1 {t.SURFACE});
-        border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS}px;
+        border: 2px solid {t.BORDER};
+    }}
+    QFrame#heroCard[heroLevel="ok"] {{
+        border-color: {t.SUCCESS_BORDER};
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+            stop:0 rgba(52, 211, 153, 0.12), stop:1 {t.SURFACE});
+    }}
+    QFrame#heroCard[heroLevel="warn"] {{
+        border-color: {t.WARN_BORDER};
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+            stop:0 rgba(251, 191, 36, 0.12), stop:1 {t.SURFACE});
+    }}
+    QFrame#heroCard[heroLevel="alarm"] {{
+        border-color: {t.ERROR_BORDER};
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+            stop:0 rgba(248, 113, 113, 0.12), stop:1 {t.SURFACE});
     }}
     QLabel#heroLabel {{
         color: {t.TEXT_DIM};
@@ -138,6 +176,18 @@ def build_stylesheet() -> str:
     }}
     QFrame#statCard:hover {{
         border-color: rgba(34, 211, 238, 0.35);
+    }}
+    QFrame#statCard[cardLevel="ok"] {{
+        border-color: {t.SUCCESS_BORDER};
+        background-color: rgba(52, 211, 153, 0.06);
+    }}
+    QFrame#statCard[cardLevel="warn"] {{
+        border-color: {t.WARN_BORDER};
+        background-color: rgba(251, 191, 36, 0.06);
+    }}
+    QFrame#statCard[cardLevel="alarm"] {{
+        border-color: {t.ERROR_BORDER};
+        background-color: rgba(248, 113, 113, 0.06);
     }}
     QLabel#statTitle {{
         color: {t.TEXT_DIM};
@@ -188,27 +238,58 @@ def build_stylesheet() -> str:
         font-weight: 700;
         padding: 8px 12px;
     }}
+    QPushButton#cmdOk {{
+        min-height: 52px;
+        border-radius: {t.RADIUS_SM}px;
+        border: 1px solid {t.SUCCESS_BORDER};
+        background-color: {t.SUCCESS_BG};
+        color: {t.SUCCESS};
+        font-size: 10pt;
+        font-weight: 700;
+        padding: 8px 12px;
+    }}
+    QPushButton#cmdOk:hover {{
+        background-color: rgba(52, 211, 153, 0.28);
+    }}
+    QPushButton#cmdWarn {{
+        min-height: 52px;
+        border-radius: {t.RADIUS_SM}px;
+        border: 1px solid {t.WARN_BORDER};
+        background-color: {t.WARN_BG};
+        color: {t.WARN};
+        font-size: 10pt;
+        font-weight: 700;
+        padding: 8px 12px;
+    }}
+    QPushButton#cmdWarn:hover {{
+        background-color: rgba(251, 191, 36, 0.28);
+    }}
+    QPushButton#cmdOk:disabled, QPushButton#cmdWarn:disabled, QPushButton#cmdBtn:disabled {{
+        color: {t.TEXT_MUTED};
+        background-color: {t.SURFACE};
+        border-color: {t.BORDER};
+    }}
     QPushButton#cmdBtn:hover {{
         border-color: {t.ACCENT};
         background-color: {t.SURFACE_HOVER};
     }}
-    QPushButton#cmdBtn:disabled {{
-        color: {t.TEXT_MUTED};
-        background-color: {t.SURFACE};
-    }}
     QPushButton#cmdDanger {{
         min-height: 52px;
         border-radius: {t.RADIUS_SM}px;
-        border: 1px solid rgba(248, 113, 113, 0.55);
-        background-color: rgba(248, 113, 113, 0.1);
-        color: {t.TEXT};
+        border: 1px solid {t.ERROR_BORDER};
+        background-color: {t.ERROR_BG};
+        color: {t.ERROR};
         font-size: 10pt;
         font-weight: 700;
         padding: 8px 12px;
     }}
     QPushButton#cmdDanger:hover {{
-        background-color: rgba(248, 113, 113, 0.2);
-        color: {t.ERROR};
+        background-color: rgba(248, 113, 113, 0.28);
+    }}
+    QPushButton#cmdDanger:disabled {{
+        color: {t.TEXT_MUTED};
+        background-color: {t.SURFACE};
+        border-color: {t.BORDER};
     }}
     QPushButton#cmdAccent {{
         min-height: 48px;
@@ -324,13 +405,21 @@ def build_stylesheet() -> str:
         border-radius: {t.RADIUS_SM}px;
         min-height: 40px;
     }}
-    QFrame#flagChip[active="true"] {{
-        border-color: rgba(52, 211, 153, 0.55);
-        background-color: rgba(52, 211, 153, 0.08);
+    QFrame#flagChip[chipLevel="ok"] {{
+        border-color: {t.SUCCESS_BORDER};
+        background-color: rgba(52, 211, 153, 0.1);
     }}
-    QFrame#flagChip[alarm="true"] {{
-        border-color: rgba(248, 113, 113, 0.55);
-        background-color: rgba(248, 113, 113, 0.08);
+    QFrame#flagChip[chipLevel="warn"] {{
+        border-color: {t.WARN_BORDER};
+        background-color: rgba(251, 191, 36, 0.1);
+    }}
+    QFrame#flagChip[chipLevel="alarm"] {{
+        border-color: {t.ERROR_BORDER};
+        background-color: rgba(248, 113, 113, 0.1);
+    }}
+    QFrame#flagChip[chipLevel="off"] {{
+        border-color: {t.BORDER};
+        background-color: {t.SURFACE};
     }}
     QLineEdit, QDoubleSpinBox, QSpinBox {{
         background-color: {t.SURFACE_RAISED};
@@ -380,7 +469,7 @@ def build_stylesheet() -> str:
     }}
     QProgressBar::chunk {{
         background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-            stop:0 {t.ACCENT_DIM}, stop:1 {t.ACCENT});
+            stop:0 {t.SUCCESS}, stop:1 {t.ACCENT});
         border-radius: 6px;
     }}
     QListWidget#journalList {{
@@ -474,6 +563,7 @@ class StatCard(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("statCard")
+        self.setProperty("cardLevel", "neutral")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setMinimumHeight(72 if compact else 80)
         layout = QVBoxLayout(self)
@@ -508,11 +598,16 @@ class StatCard(QFrame):
         if self._value.text() != text:
             self._value.setText(text)
 
+    def set_level(self, level: str) -> None:
+        if self.property("cardLevel") != level:
+            _apply_prop(self, "cardLevel", level)
+
 
 class HeroCard(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("heroCard")
+        self.setProperty("heroLevel", "neutral")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(24, 18, 24, 18)
         layout.setSpacing(16)
@@ -543,27 +638,38 @@ class HeroCard(QFrame):
         if self._value.text() != text:
             self._value.setText(text)
 
+    def set_level(self, level: str) -> None:
+        if self.property("heroLevel") != level:
+            _apply_prop(self, "heroLevel", level)
+
 
 class CmdButton(QPushButton):
+    _STYLES = {
+        "ok": ("cmdOk", t.SUCCESS),
+        "warn": ("cmdWarn", t.WARN),
+        "alarm": ("cmdDanger", t.ERROR),
+        "neutral": ("cmdBtn", t.TEXT),
+    }
+
     def __init__(
         self,
         icon_name: str,
         label: str,
         *,
+        variant: str = "neutral",
         danger: bool = False,
         accent: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         if danger:
-            self.setObjectName("cmdDanger")
-            color = t.ERROR
+            variant = "alarm"
         elif accent:
-            self.setObjectName("cmdAccent")
-            color = t.ACCENT
-        else:
-            self.setObjectName("cmdBtn")
-            color = t.TEXT
+            variant = "ok"
+        obj_name, color = self._STYLES.get(variant, self._STYLES["neutral"])
+        self.setObjectName(obj_name)
+        self._icon_name = icon_name
+        self._icon_color = color
         self.setIcon(ic.icon(icon_name, color=color, size=22))
         self.setIconSize(ic.icon_size(22))
         self.setText(label)
@@ -582,15 +688,17 @@ class PageBar(QWidget):
         row.addStretch()
         self._badge = QLabel("")
         self._badge.setObjectName("stateBadge")
+        self._badge.setProperty("statusLevel", "neutral")
         self._badge.hide()
         row.addWidget(self._badge)
         self._dirty = QLabel("")
         self._dirty.setObjectName("dirtyBadge")
         row.addWidget(self._dirty)
 
-    def set_badge(self, text: str) -> None:
+    def set_badge(self, text: str, level: str = "neutral") -> None:
         if text:
             self._badge.setText(text)
+            _apply_prop(self._badge, "statusLevel", level)
             self._badge.show()
         else:
             self._badge.hide()
@@ -622,8 +730,8 @@ class FlagChip(QFrame):
     def __init__(self, icon_name: str, label: str, *, alarm: bool = False) -> None:
         super().__init__()
         self.setObjectName("flagChip")
-        self.setProperty("active", False)
-        self.setProperty("alarm", alarm)
+        self.setProperty("chipLevel", "off")
+        self._alarm = alarm
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setMinimumHeight(44)
         row = QHBoxLayout(self)
@@ -633,33 +741,37 @@ class FlagChip(QFrame):
         self._ico.setFixedSize(18, 18)
         self._ico.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._icon_name = icon_name
-        self._alarm = alarm
         self._label = QLabel(label)
         self._label.setObjectName("lampText")
         self._label.setWordWrap(True)
         row.addWidget(self._ico, 0, Qt.AlignmentFlag.AlignTop)
         row.addWidget(self._label, stretch=1)
-        self._refresh_icon(active=False)
+        self._chip_level = "off"
+        self._refresh_icon("off")
+
+    def set_chip_level(self, level: str) -> None:
+        if self._chip_level == level:
+            return
+        self._chip_level = level
+        _apply_prop(self, "chipLevel", level)
+        self._refresh_icon(level)
 
     def set_active(self, active: bool) -> None:
-        if self.property("active") == active:
-            return
-        self.setProperty("active", active)
-        self._refresh_icon(active)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.set_chip_level("ok" if active and not self._alarm else ("alarm" if active and self._alarm else "off"))
 
     def set_label(self, text: str) -> None:
         if self._label.text() != text:
             self._label.setText(text)
 
-    def _refresh_icon(self, active: bool) -> None:
-        if active:
-            color = t.ERROR if self._alarm else t.SUCCESS
-            name = "warning" if self._alarm else "check"
+    def _refresh_icon(self, level: str) -> None:
+        if level == "alarm":
+            color, name = t.ERROR, "warning"
+        elif level == "warn":
+            color, name = t.WARN, "warning"
+        elif level == "ok":
+            color, name = t.SUCCESS, "check"
         else:
-            color = t.TEXT_MUTED
-            name = self._icon_name
+            color, name = t.TEXT_MUTED, self._icon_name
         self._ico.setPixmap(ic.icon(name, color=color, size=18).pixmap(18, 18))
 
 
