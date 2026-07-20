@@ -116,7 +116,6 @@ class PidAutotuner:
         self._extremum = 0.0
         self._looking_peak = True
         self._cycles = 0
-        self._last_speed = 0.0
 
     def start(self) -> None:
         self.phase = AutotunePhase.RAMP
@@ -131,7 +130,6 @@ class PidAutotuner:
         self._extremum = 0.0
         self._looking_peak = True
         self._cycles = 0
-        self._last_speed = 0.0
 
     def abort(self, reason: str = "Прервано") -> None:
         if self.phase in (AutotunePhase.DONE, AutotunePhase.FAILED, AutotunePhase.ABORTED, AutotunePhase.IDLE):
@@ -143,7 +141,6 @@ class PidAutotuner:
     def step(self, actual_mpm: float, dt_s: float) -> AutotuneStep:
         _ = dt_s
         speed = max(0.0, float(actual_mpm))
-        self._last_speed = speed
         now = monotonic()
         elapsed = now - self._t0
 

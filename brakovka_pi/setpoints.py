@@ -20,7 +20,6 @@ class SetpointDef:
     hi: float = float("inf")
     scale: float = 1.0
     persist: bool = False
-    unit_note: str = ""
     param_attr: str | None = None
     param_scale: float = 1.0
 
@@ -35,7 +34,6 @@ def _sp(
     hi: float = float("inf"),
     scale: float = 1.0,
     persist: bool = False,
-    unit_note: str = "",
     param_attr: str | None = None,
     param_scale: float = 1.0,
 ) -> SetpointDef:
@@ -48,7 +46,6 @@ def _sp(
         hi=hi,
         scale=scale,
         persist=persist,
-        unit_note=unit_note,
         param_attr=param_attr if param_attr is not None else key,
         param_scale=param_scale,
     )
@@ -63,7 +60,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=300.0,
         persist=True,
-        unit_note="m/min",
     ),
     _sp(
         "target_length_m",
@@ -72,7 +68,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=1e9,
         persist=True,
-        unit_note="m",
     ),
     _sp(
         "jog_speed_mpm",
@@ -80,7 +75,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=300.0,
         persist=True,
-        unit_note="m/min",
     ),
     _sp(
         "reverse_speed_mpm",
@@ -88,7 +82,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=300.0,
         persist=True,
-        unit_note="m/min",
     ),
     _sp(
         "slowdown_speed_mpm",
@@ -97,7 +90,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=300.0,
         persist=True,
-        unit_note="m/min",
     ),
     _sp(
         "slowdown_start_pct",
@@ -105,7 +97,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=1.0,
         hi=100.0,
         persist=True,
-        unit_note="%",
     ),
     _sp(
         "accel_time_s",
@@ -114,7 +105,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.1,
         hi=300.0,
         persist=True,
-        unit_note="s",
     ),
     _sp(
         "decel_time_s",
@@ -123,7 +113,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.1,
         hi=300.0,
         persist=True,
-        unit_note="s",
     ),
     _sp(
         "brake_delay_s",
@@ -131,7 +120,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=60.0,
         persist=True,
-        unit_note="s",
     ),
     _sp(
         "pid_kp",
@@ -140,7 +128,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=1e6,
         persist=True,
-        unit_note="Hz/(m/min)",
     ),
     _sp(
         "pid_ti",
@@ -149,7 +136,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=1e6,
         persist=True,
-        unit_note="s",
     ),
     _sp(
         "pid_kd",
@@ -158,7 +144,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=1e6,
         persist=True,
-        unit_note="Hz·s/(m/min)",
     ),
     _sp(
         "mpm_per_hz",
@@ -166,7 +151,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.01,
         hi=1000.0,
         persist=True,
-        unit_note="(m/min)/Hz feedforward gain",
     ),
     _sp(
         "roll_encoder_diameter_mm",
@@ -176,7 +160,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=20.0,
         hi=500.0,
         persist=True,
-        unit_note="mm (apply_setpoint); stored as roll_diameter_m",
         param_attr="roll_diameter_m",
         param_scale=1000.0,
     ),
@@ -186,7 +169,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.01,
         hi=1000.0,
         persist=False,
-        unit_note="(m/min)/Hz emulator",
     ),
     _sp(
         "tension_setpoint_n",
@@ -195,7 +177,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=5000.0,
         persist=True,
-        unit_note="N",
     ),
     _sp(
         "tension_brake_gain_n",
@@ -203,7 +184,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=1.0,
         hi=50000.0,
         persist=True,
-        unit_note="N at 100% brake @ start diameter",
     ),
     _sp(
         "unwind_roll_length_m",
@@ -212,14 +192,12 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=1e7,
         persist=True,
-        unit_note="m",
     ),
     _sp(
         "start_diameter_mm",
         lo=50.0,
         hi=3000.0,
         persist=False,
-        unit_note="mm legacy SCADA; derived from length",
         param_attr="start_diameter_m",
         param_scale=1000.0,
     ),
@@ -230,7 +208,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.001,
         hi=10.0,
         persist=True,
-        unit_note="mm (apply_setpoint); stored as material_thickness_m",
         param_attr="material_thickness_m",
         param_scale=1000.0,
     ),
@@ -241,7 +218,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=10.0,
         hi=1000.0,
         persist=True,
-        unit_note="mm (apply_setpoint); stored as core_diameter_m",
         param_attr="core_diameter_m",
         param_scale=1000.0,
     ),
@@ -251,14 +227,12 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=100.0,
         persist=True,
-        unit_note="%",
     ),
     _sp(
         "brake_max_pressure_pct",
         lo=0.0,
         hi=100.0,
         persist=True,
-        unit_note="%",
     ),
     _sp(
         "encoder_invert",
@@ -266,7 +240,6 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         lo=0.0,
         hi=1.0,
         persist=True,
-        unit_note="0/1 invert measuring-roller direction",
     ),
 )
 
@@ -276,13 +249,9 @@ UI_TO_MACHINE: dict[str, str] = {
     s.ui_key: s.key for s in _SETPOINT_LIST if s.ui_key is not None
 }
 
-# (opc_name, machine_key, getter_hint) — getter_hint is MachineParams attr [* scale]
-OPC_DEFS: list[tuple[str, str, str]] = [
-    (
-        s.opc_name,
-        s.key,
-        s.param_attr if s.param_scale == 1.0 else f"{s.param_attr}*{s.param_scale:g}",
-    )
+# (opc_name, machine_key)
+OPC_DEFS: list[tuple[str, str]] = [
+    (s.opc_name, s.key)
     for s in _SETPOINT_LIST
     if s.opc_name is not None
 ]

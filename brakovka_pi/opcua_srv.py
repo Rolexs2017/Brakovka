@@ -137,7 +137,7 @@ class OpcUaBridge:
 
         sp_defs: list[_SpVar] = [
             _SpVar(opc_name, _param_getter(self.machine, key), key)
-            for opc_name, key, _hint in OPC_DEFS
+            for opc_name, key in OPC_DEFS
         ]
 
         sp_nodes: dict[str, any] = {}
@@ -184,7 +184,7 @@ class OpcUaBridge:
 
     def _current_machine_setpoints(self) -> dict[str, float]:
         out: dict[str, float] = {}
-        for _opc_name, key, _hint in OPC_DEFS:
+        for _opc_name, key in OPC_DEFS:
             sp = SETPOINTS[key]
             attr = sp.param_attr or key
             out[key] = float(getattr(self.machine.params, attr)) * sp.param_scale

@@ -47,7 +47,7 @@
     "unwind_roll_length_m": 2500.0,
     "core_diameter_mm": 76.0,
     "material_thickness_mm": 0.3,
-    "roll_encoder_diameter_mm": 200.0,
+    "roll_encoder_diameter_mm": 44.0,
     "tension_setpoint_n": 150.0,
     "tension_brake_gain_n": 500.0,
     "target_length_m": 500.0,

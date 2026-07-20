@@ -106,7 +106,7 @@ class MachineConfig:
     unwind_roll_length_m: float = 2500.0
     core_diameter_mm: float = 76.0
     material_thickness_mm: float = 0.3
-    roll_encoder_diameter_mm: float = 200.0
+    roll_encoder_diameter_mm: float = 44.0
     tension_setpoint_n: float = 150.0
     tension_brake_gain_n: float = 500.0
     target_length_m: float = 500.0
@@ -244,7 +244,7 @@ def load_runtime_config():
         material_thickness_mm=thickness_mm,
         roll_encoder_diameter_mm=_machine_clamp(
             "roll_encoder_diameter_mm",
-            float(machine_raw.get("roll_encoder_diameter_mm", 200.0)),
+            float(machine_raw.get("roll_encoder_diameter_mm", 44.0)),
         ),
         tension_setpoint_n=_machine_clamp(
             "tension_setpoint_n", float(machine_raw.get("tension_setpoint_n", 150.0))

@@ -28,11 +28,8 @@ class BrakePwm:
             pct = 100.0
         self._pwm.value = pct / 100.0
 
-    def off(self) -> None:
-        self.set_pressure_pct(0.0)
-
     def close(self) -> None:
-        self.off()
+        self.set_pressure_pct(0.0)
         if self._pwm is not None:
             try:
                 self._pwm.close()

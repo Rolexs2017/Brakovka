@@ -280,7 +280,6 @@ class ThreadedEncoder:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._telem = EncoderTelemetry()
-        self._wound_enable = True
         self._pending_reset_wound = False
         self._pending_reset_unwind = False
 
@@ -311,10 +310,6 @@ class ThreadedEncoder:
     def snapshot(self) -> EncoderTelemetry:
         with self._lock:
             return replace(self._telem)
-
-    def set_wound_enable(self, enabled: bool) -> None:
-        with self._lock:
-            self._wound_enable = bool(enabled)
 
     def set_roll_diameter_m(self, roll_diameter_m: float) -> None:
         with self._lock:
@@ -353,4 +348,4 @@ class ThreadedEncoder:
                 if self._pending_reset_wound:
                     self._enc.reset_wound()
                     self._pending_reset_wound = False
-                self._telem = self._enc.poll(dt, wound_enable=self._wound_enable)
+                self._telem = self._enc.poll(dt, wound_enable=True)

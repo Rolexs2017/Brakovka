@@ -124,7 +124,6 @@ class SimEncoder:
         )
 
         return {
-            "speed_mpm": self._speed_mpm,
             "wound_m": wound_m,
             "unwind_m": unwind_m,
             "pulses": self._wound_pulses,

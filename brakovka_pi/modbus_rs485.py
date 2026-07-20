@@ -62,7 +62,6 @@ class Rs485Vfd:
         self._de_ok = False
         self._de_error = ""
         self._de_timer: threading.Timer | None = None
-        self._de_patched = False
         raw_de = getattr(serial, "rs485_de", RS485_DE_GPIO)
         self._de_pin: int | None = int(raw_de) if raw_de is not None and int(raw_de) > 0 else None
         self._use_gpio_de = self._de_pin is not None
@@ -123,10 +122,6 @@ class Rs485Vfd:
     @property
     def de_error(self) -> str:
         return self._de_error
-
-    @property
-    def de_patched(self) -> bool:
-        return self._de_patched
 
     @property
     def connected(self) -> bool:
@@ -221,7 +216,6 @@ class Rs485Vfd:
             if before > 0:
                 time.sleep(before)
             self._arm_rx_after_tx(len(data))
-            self._de_patched = True
         elif not sending:
             self._cancel_de_timer()
             self._rx_mode()
@@ -278,7 +272,6 @@ class Rs485Vfd:
         except Exception:
             pass
         self._connected = False
-        self._de_patched = False
 
     def _client_alive(self) -> bool:
         return self._connected and bool(getattr(self._client, "connected", False))

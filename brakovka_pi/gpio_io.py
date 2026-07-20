@@ -283,6 +283,16 @@ class GpioInputs:
         self._prev_start = False
         self._prev_stop = False
         self._prev_reset_wound = False
+        self._cached_levels = GpioLevels(
+            available=False,
+            pin_start=self._pin_start,
+            pin_stop=self._pin_stop,
+            pin_jog=self._pin_jog,
+            pin_reverse=self._pin_reverse,
+            pin_reset_wound=self._pin_reset_wound,
+            error="",
+            pin_factory="",
+        )
 
         if Button is None:
             self._error = (
@@ -291,6 +301,9 @@ class GpioInputs:
                 + _permission_hint()
             )
             log.warning("GPIO buttons disabled: %s", self._error)
+            self._cached_levels = self._snapshot_levels(
+                start=False, stop=False, jog=False, reverse=False, reset_wound=False
+            )
             return
 
         try:
@@ -318,6 +331,9 @@ class GpioInputs:
             self._jog = None
             self._rev = None
             self._reset_wound = None
+            self._cached_levels = self._snapshot_levels(
+                start=False, stop=False, jog=False, reverse=False, reset_wound=False
+            )
             return
 
         self._available = True
@@ -325,6 +341,13 @@ class GpioInputs:
         self._prev_start = bool(self._start.is_pressed)
         self._prev_stop = bool(self._stop.is_pressed)
         self._prev_reset_wound = bool(self._reset_wound.is_pressed)
+        self._cached_levels = self._snapshot_levels(
+            start=self._prev_start,
+            stop=self._prev_stop,
+            jog=self._pressed(self._jog),
+            reverse=self._pressed(self._rev),
+            reset_wound=self._prev_reset_wound,
+        )
         log.info(
             "GPIO buttons ready via %s: start=%s stop=%s jog=%s reverse=%s reset_wound=%s "
             "(active in real and emulator modes)",
@@ -353,6 +376,17 @@ class GpioInputs:
 
     def read_levels(self) -> GpioLevels:
         """Current pressed state of each digital input (not pulse latches)."""
+        return self._cached_levels
+
+    def _snapshot_levels(
+        self,
+        *,
+        start: bool,
+        stop: bool,
+        jog: bool,
+        reverse: bool,
+        reset_wound: bool,
+    ) -> GpioLevels:
         if not self._available:
             return GpioLevels(
                 available=False,
@@ -366,11 +400,11 @@ class GpioInputs:
             )
         return GpioLevels(
             available=True,
-            start=self._pressed(self._start),
-            stop=self._pressed(self._stop),
-            jog=self._pressed(self._jog),
-            reverse=self._pressed(self._rev),
-            reset_wound=self._pressed(self._reset_wound),
+            start=start,
+            stop=stop,
+            jog=jog,
+            reverse=reverse,
+            reset_wound=reset_wound,
             pin_start=self._pin_start,
             pin_stop=self._pin_stop,
             pin_jog=self._pin_jog,
@@ -380,8 +414,8 @@ class GpioInputs:
             pin_factory=self._pin_factory,
         )
 
-    def _update_pulse_latches(self) -> None:
-        """Rising-edge latch for pulse buttons (polled each control cycle)."""
+    def _update_pulse_latches(self) -> tuple[bool, bool, bool]:
+        """Rising-edge latch for pulse buttons. Returns (start, stop, reset_wound) levels."""
         start_now = self._pressed(self._start)
         stop_now = self._pressed(self._stop)
         reset_now = self._pressed(self._reset_wound)
@@ -396,10 +430,14 @@ class GpioInputs:
         self._prev_start = start_now
         self._prev_stop = stop_now
         self._prev_reset_wound = reset_now
+        return start_now, stop_now, reset_now
 
     def read(self) -> Inputs:
         # estop_ok: пока нет отдельного E-STOP пина — считаем что OK
         if not self._available:
+            self._cached_levels = self._snapshot_levels(
+                start=False, stop=False, jog=False, reverse=False, reset_wound=False
+            )
             return Inputs(
                 start_pulse=self._start_p.read(),
                 stop_pulse=self._stop_p.read(),
@@ -410,12 +448,21 @@ class GpioInputs:
                 reset_wound_pulse=self._reset_wound_p.read(),
             )
 
-        self._update_pulse_latches()
+        start_lvl, stop_lvl, reset_lvl = self._update_pulse_latches()
+        jog_lvl = self._pressed(self._jog)
+        rev_lvl = self._pressed(self._rev)
+        self._cached_levels = self._snapshot_levels(
+            start=start_lvl,
+            stop=stop_lvl,
+            jog=jog_lvl,
+            reverse=rev_lvl,
+            reset_wound=reset_lvl,
+        )
         return Inputs(
             start_pulse=self._start_p.read(),
             stop_pulse=self._stop_p.read(),
-            jog_level=self._pressed(self._jog),
-            reverse_level=self._pressed(self._rev),
+            jog_level=jog_lvl,
+            reverse_level=rev_lvl,
             estop_ok=True,
             reset_roll_pulse=False,
             reset_wound_pulse=self._reset_wound_p.read(),

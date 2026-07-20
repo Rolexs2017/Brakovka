@@ -29,8 +29,6 @@ class VfdIoSnapshot:
     warning: bool = False
     write_ok: bool = True
     read_ok: bool = True
-    connected: bool = False
-    last_cmd_hz: float = 0.0
 
 
 class AsyncVfdBridge:
@@ -145,8 +143,6 @@ class AsyncVfdBridge:
             self._snap = replace(
                 self._snap,
                 write_ok=bool(ok),
-                last_cmd_hz=float(cmd.speed_setpoint_hz),
-                connected=bool(getattr(self._vfd, "connected", False)),
             )
             if not ok:
                 await self._vfd.reconnect()
@@ -163,11 +159,9 @@ class AsyncVfdBridge:
                     fault=bool(st.get("fault", False)),
                     warning=bool(st.get("warning", False)),
                     read_ok=True,
-                    connected=True,
                 )
             else:
                 self._snap = replace(
                     self._snap,
                     read_ok=False,
-                    connected=bool(getattr(self._vfd, "connected", False)),
                 )

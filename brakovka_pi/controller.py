@@ -20,7 +20,6 @@ from .encoder import (
 )
 from .emulation import EmulatedVfd, SimEncoder
 from .gpio_io import GpioInputs
-from .logutil import setup_logging
 from .machine import Inputs, Machine
 from .modbus_rs485 import Rs485Vfd, VfdCommand
 from .opcua_srv import OpcUaBridge
@@ -319,14 +318,12 @@ async def run_controller(
 
                 state = m.telem.state
                 forward = state != MachineState.REVERSE
-                # Мерный ролик считает факт движения всегда (в т.ч. IDLE — калибровка).
-                wound_enable = True
                 if emulator:
                     e = encoder.step(
                         ctrl_dt,
                         last_freq_cmd,
                         forward=forward,
-                        wound_enable=wound_enable,
+                        wound_enable=True,
                     )
                     wound_m = float(e["wound_m"])
                     m.telem.wound_length_m = wound_m
@@ -340,7 +337,6 @@ async def run_controller(
                     m.telem.magnet_ok = True
                 else:
                     assert enc_thread is not None
-                    enc_thread.set_wound_enable(wound_enable)
                     e = enc_thread.snapshot()
                     wound_m = float(e.wound_m)
                     m.telem.wound_length_m = wound_m
@@ -429,7 +425,6 @@ async def run_controller(
                         autotuner = None
                         freq_cmd_hz = 0.0
                         run_cmd = False
-                    sp_mpm = float(m.params.jog_speed_mpm) if run_cmd else 0.0
                 else:
                     if autotuner is not None:
                         autotuner = None
@@ -568,11 +563,6 @@ async def run_controller(
                 enc_thread.close()
             except Exception:
                 machine_log.exception("Encoder thread shutdown failed")
-        elif enc_hw is not None:
-            try:
-                enc_hw.close()
-            except Exception:
-                machine_log.exception("Encoder close failed")
         if hmi_bridge is not None:
             hmi_bridge.detach()
         try:
@@ -588,7 +578,6 @@ async def run_controller(
 
 
 async def main() -> None:
-    setup_logging()
     await run_controller()
 
 
