@@ -67,13 +67,13 @@ def build_stylesheet() -> str:
     }}
     #connBadge[connected="true"] {{
         color: {t.SUCCESS};
-        background: rgba(52, 211, 153, 0.12);
-        border: 1px solid rgba(52, 211, 153, 0.35);
+        background: {t.SUCCESS_BG};
+        border: 1px solid {t.SUCCESS_BORDER};
     }}
     #connBadge[connected="false"] {{
         color: {t.ERROR};
-        background: rgba(248, 113, 113, 0.12);
-        border: 1px solid rgba(248, 113, 113, 0.35);
+        background: {t.ERROR_BG};
+        border: 1px solid {t.ERROR_BORDER};
     }}
     #navRail {{
         background-color: {t.SURFACE};
@@ -94,7 +94,7 @@ def build_stylesheet() -> str:
     QPushButton#navBtn:checked {{
         background: {t.ACCENT_GLOW};
         color: {t.ACCENT};
-        border: 1px solid rgba(34, 211, 238, 0.35);
+        border: 1px solid {t.ACCENT_BORDER};
     }}
     QPushButton#navBtn:hover:!checked {{
         background: {t.SURFACE_HOVER};
@@ -131,7 +131,7 @@ def build_stylesheet() -> str:
     #stateBadge[statusLevel="neutral"] {{
         color: {t.ACCENT};
         background: {t.ACCENT_GLOW};
-        border: 1px solid rgba(34, 211, 238, 0.35);
+        border: 1px solid {t.ACCENT_BORDER};
     }}
     QFrame#heroCard {{
         background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
@@ -142,17 +142,17 @@ def build_stylesheet() -> str:
     QFrame#heroCard[heroLevel="ok"] {{
         border-color: {t.SUCCESS_BORDER};
         background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-            stop:0 rgba(52, 211, 153, 0.12), stop:1 {t.SURFACE});
+            stop:0 {t.SUCCESS_GLOW}, stop:1 {t.SURFACE});
     }}
     QFrame#heroCard[heroLevel="warn"] {{
         border-color: {t.WARN_BORDER};
         background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-            stop:0 rgba(251, 191, 36, 0.12), stop:1 {t.SURFACE});
+            stop:0 {t.WARN_GLOW}, stop:1 {t.SURFACE});
     }}
     QFrame#heroCard[heroLevel="alarm"] {{
         border-color: {t.ERROR_BORDER};
         background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-            stop:0 rgba(248, 113, 113, 0.12), stop:1 {t.SURFACE});
+            stop:0 {t.ERROR_GLOW}, stop:1 {t.SURFACE});
     }}
     QLabel#heroLabel {{
         color: {t.TEXT_DIM};
@@ -175,19 +175,19 @@ def build_stylesheet() -> str:
         border-radius: {t.RADIUS_SM}px;
     }}
     QFrame#statCard:hover {{
-        border-color: rgba(34, 211, 238, 0.35);
+        border-color: {t.ACCENT_BORDER};
     }}
     QFrame#statCard[cardLevel="ok"] {{
         border-color: {t.SUCCESS_BORDER};
-        background-color: rgba(52, 211, 153, 0.06);
+        background-color: {t.SUCCESS_GLOW};
     }}
     QFrame#statCard[cardLevel="warn"] {{
         border-color: {t.WARN_BORDER};
-        background-color: rgba(251, 191, 36, 0.06);
+        background-color: {t.WARN_GLOW};
     }}
     QFrame#statCard[cardLevel="alarm"] {{
         border-color: {t.ERROR_BORDER};
-        background-color: rgba(248, 113, 113, 0.06);
+        background-color: {t.ERROR_GLOW};
     }}
     QLabel#statTitle {{
         color: {t.TEXT_DIM};
@@ -249,7 +249,7 @@ def build_stylesheet() -> str:
         padding: 8px 12px;
     }}
     QPushButton#cmdOk:hover {{
-        background-color: rgba(52, 211, 153, 0.28);
+        background-color: rgba(0, 255, 136, 0.45);
     }}
     QPushButton#cmdWarn {{
         min-height: 52px;
@@ -262,7 +262,7 @@ def build_stylesheet() -> str:
         padding: 8px 12px;
     }}
     QPushButton#cmdWarn:hover {{
-        background-color: rgba(251, 191, 36, 0.28);
+        background-color: rgba(255, 208, 0, 0.45);
     }}
     QPushButton#cmdOk:disabled, QPushButton#cmdWarn:disabled, QPushButton#cmdBtn:disabled {{
         color: {t.TEXT_MUTED};
@@ -284,7 +284,7 @@ def build_stylesheet() -> str:
         padding: 8px 12px;
     }}
     QPushButton#cmdDanger:hover {{
-        background-color: rgba(248, 113, 113, 0.28);
+        background-color: rgba(255, 71, 87, 0.45);
     }}
     QPushButton#cmdDanger:disabled {{
         color: {t.TEXT_MUTED};
@@ -294,14 +294,14 @@ def build_stylesheet() -> str:
     QPushButton#cmdAccent {{
         min-height: 48px;
         border-radius: {t.RADIUS_SM}px;
-        border: 1px solid rgba(34, 211, 238, 0.55);
+        border: 1px solid {t.ACCENT_BORDER};
         background-color: {t.ACCENT_GLOW};
-        color: {t.TEXT};
+        color: {t.ACCENT};
         font-size: 10pt;
         font-weight: 700;
     }}
     QPushButton#cmdAccent:hover {{
-        background-color: rgba(34, 211, 238, 0.28);
+        background-color: rgba(0, 234, 255, 0.45);
     }}
     QPushButton#chipBtn {{
         min-height: 40px;
@@ -315,7 +315,7 @@ def build_stylesheet() -> str:
     }}
     QPushButton#chipBtn:checked {{
         background-color: {t.ACCENT_GLOW};
-        border-color: rgba(34, 211, 238, 0.45);
+        border-color: {t.ACCENT_BORDER};
         color: {t.ACCENT};
     }}
     QPushButton#settingsTile {{
@@ -329,20 +329,20 @@ def build_stylesheet() -> str:
         font-weight: 700;
     }}
     QPushButton#settingsTile:hover {{
-        border-color: rgba(34, 211, 238, 0.45);
+        border-color: {t.ACCENT_BORDER};
         background-color: {t.SURFACE_RAISED};
     }}
     QPushButton#primary {{
         background-color: {t.ACCENT_GLOW};
-        border: 1px solid rgba(34, 211, 238, 0.55);
+        border: 1px solid {t.ACCENT_BORDER};
         border-radius: {t.RADIUS_SM}px;
         padding: 10px 18px;
         font-weight: 700;
-        color: {t.TEXT};
+        color: {t.ACCENT};
         min-height: 44px;
     }}
     QPushButton#primary:hover {{
-        background-color: rgba(34, 211, 238, 0.28);
+        background-color: rgba(0, 234, 255, 0.45);
     }}
     QPushButton#cmd {{
         min-height: 44px;
@@ -355,9 +355,9 @@ def build_stylesheet() -> str:
     QPushButton#cmdStop {{
         min-height: 44px;
         border-radius: {t.RADIUS_SM}px;
-        border: 1px solid rgba(248, 113, 113, 0.55);
-        background-color: rgba(248, 113, 113, 0.1);
-        color: {t.TEXT};
+        border: 1px solid {t.ERROR_BORDER};
+        background-color: {t.ERROR_BG};
+        color: {t.ERROR};
         font-weight: 700;
     }}
     QPushButton#settingsGroup {{
@@ -370,7 +370,7 @@ def build_stylesheet() -> str:
         font-weight: 600;
     }}
     QPushButton#settingsGroup:hover {{
-        border-color: rgba(34, 211, 238, 0.45);
+        border-color: {t.ACCENT_BORDER};
     }}
     QLabel#screenTitle {{
         font-size: 15pt;
@@ -407,15 +407,15 @@ def build_stylesheet() -> str:
     }}
     QFrame#flagChip[chipLevel="ok"] {{
         border-color: {t.SUCCESS_BORDER};
-        background-color: rgba(52, 211, 153, 0.1);
+        background-color: {t.SUCCESS_GLOW};
     }}
     QFrame#flagChip[chipLevel="warn"] {{
         border-color: {t.WARN_BORDER};
-        background-color: rgba(251, 191, 36, 0.1);
+        background-color: {t.WARN_GLOW};
     }}
     QFrame#flagChip[chipLevel="alarm"] {{
         border-color: {t.ERROR_BORDER};
-        background-color: rgba(248, 113, 113, 0.1);
+        background-color: {t.ERROR_GLOW};
     }}
     QFrame#flagChip[chipLevel="off"] {{
         border-color: {t.BORDER};
@@ -449,7 +449,7 @@ def build_stylesheet() -> str:
     QRadioButton#pidMethod::indicator:checked {{
         border: 2px solid {t.ACCENT};
         border-radius: 10px;
-        background: rgba(34, 211, 238, 0.35);
+        background: rgba(0, 234, 255, 0.50);
     }}
     QWidget#trendPlot {{
         background-color: {t.SURFACE};
