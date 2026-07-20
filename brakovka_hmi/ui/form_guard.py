@@ -59,6 +59,9 @@ class EditableFormMixin:
             sig.emit(self._form_dirty)
 
     def _mark_form_dirty(self, *_args) -> None:
+        # Radio/spin signals can fire while the form is still being built.
+        if not hasattr(self, "_form_dirty"):
+            return
         was = self._form_dirty
         self._form_dirty = True
         if not was:

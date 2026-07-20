@@ -315,9 +315,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
             rb.setCursor(Qt.CursorShape.PointingHandCursor)
             self._pid_method_group.addButton(rb)
             self._pid_method_buttons[method] = rb
-            rb.toggled.connect(self._on_pid_method_radio_toggled)
             method_row.addWidget(rb, stretch=1)
-        self._pid_method_buttons[PidTuneMethod.RELAY.value].setChecked(True)
         lay.addLayout(method_row)
 
         self._pid_method_hint = QLabel(PID_TUNE_METHOD_HINTS[PidTuneMethod.RELAY.value])
@@ -341,6 +339,11 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._mpm_per_hz_label = QLabel("FF (м/мин)/Гц")
         form.addRow(self._mpm_per_hz_label, self._mpm_per_hz)
         lay.addLayout(form)
+
+        # Connect after widgets exist — setChecked fires toggled immediately.
+        for rb in self._pid_method_buttons.values():
+            rb.toggled.connect(self._on_pid_method_radio_toggled)
+        self._pid_method_buttons[PidTuneMethod.RELAY.value].setChecked(True)
 
         tune_row = QHBoxLayout()
         tune_row.setSpacing(10)
@@ -650,6 +653,8 @@ class SettingsScreen(EditableFormMixin, QWidget):
             self._pid_trend_info.setText(summary)
 
     def _on_pid_method_changed(self) -> None:
+        if not hasattr(self, "_pid_method_hint"):
+            return
         method = self._selected_pid_tune_method()
         self._pid_method_hint.setText(
             PID_TUNE_METHOD_HINTS.get(method, "")
