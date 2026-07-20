@@ -76,8 +76,8 @@ def build_stylesheet() -> str:
     QPushButton#navBtn {{
         border: none;
         border-radius: {t.RADIUS_SM}px;
-        margin: 3px 8px;
-        padding: 10px 10px 10px 8px;
+        margin: 3px 10px;
+        padding: 12px 12px 12px 10px;
         background: transparent;
         color: {t.TEXT_DIM};
         font-size: {t.FONT_NAV}pt;
@@ -594,6 +594,9 @@ class PageBar(QWidget):
             self._badge.show()
         else:
             self._badge.hide()
+
+    def set_title(self, text: str) -> None:
+        self._title.setText(text)
 
     def set_dirty(self, dirty: bool) -> None:
         self._dirty.setText("Не сохранено" if dirty else "")

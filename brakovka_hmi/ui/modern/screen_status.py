@@ -3,14 +3,24 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGridLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from brakovka_hmi.snapshot import MachineSnapshot, StatusFlag
-from brakovka_hmi.ui.modern.widgets import FlagChip, PageBar, Panel, StatCard
+from brakovka_hmi.ui.modern import icons as ic
+from brakovka_hmi.ui.modern import theme as t
+from brakovka_hmi.ui.modern.widgets import FlagChip, PageBar, SettingsTile, StatCard
+
+PAGE_HUB = 0
+PAGE_METRICS = 1
+PAGE_FLAGS = 2
+PAGE_GPIO = 3
 
 STATUS_ITEMS = [
     (StatusFlag.RUNNING, "play", "Станок в работе", False),
@@ -25,6 +35,13 @@ STATUS_ITEMS = [
     (StatusFlag.MODBUS_ERROR, "warning", "Ошибка Modbus", True),
 ]
 
+_PAGE_TITLES = {
+    PAGE_HUB: "Статус",
+    PAGE_METRICS: "Статус · Показания",
+    PAGE_FLAGS: "Статус · Флаги",
+    PAGE_GPIO: "Статус · GPIO",
+}
+
 
 class StatusScreen(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -33,25 +50,90 @@ class StatusScreen(QWidget):
         self._gpio_lamps: dict[str, FlagChip] = {}
         self._last_gpio_hint = ""
         self._last_gpio_pins: tuple[int, int, int, int, int] | None = None
+        self._last_state_name = ""
 
-        outer = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
+
+        self._bar = PageBar("Статус")
+        root.addWidget(self._bar)
+
+        self._stack = QStackedWidget()
+        root.addWidget(self._stack, stretch=1)
+
+        self._stack.addWidget(self._build_hub_page())
+        self._stack.addWidget(self._build_metrics_page())
+        self._stack.addWidget(self._build_flags_page())
+        self._stack.addWidget(self._build_gpio_page())
+
+        footer = QHBoxLayout()
+        self._btn_back = QPushButton("← К группам")
+        self._btn_back.setObjectName("cmd")
+        self._btn_back.setMinimumHeight(44)
+        self._btn_back.setIcon(ic.icon("back", color=t.TEXT, size=18))
+        self._btn_back.setIconSize(ic.icon_size(18))
+        self._btn_back.clicked.connect(lambda: self._show_page(PAGE_HUB))
+        self._btn_back.hide()
+        footer.addWidget(self._btn_back)
+        footer.addStretch()
+        root.addLayout(footer)
+
+        self._show_page(PAGE_HUB)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._show_page(PAGE_HUB)
+
+    def _tile(self, icon: str, title: str, subtitle: str, page: int) -> SettingsTile:
+        btn = SettingsTile(icon, title, subtitle)
+        btn.clicked.connect(lambda _=False, p=page: self._show_page(p))
+        return btn
+
+    def _build_hub_page(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(14)
+        hint = QLabel("Выберите группу статуса")
+        hint.setObjectName("hintText")
+        lay.addWidget(hint)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
+        grid.addWidget(
+            self._tile("speed", "Показания", "Скорость, привод, ПЧ, энкодер", PAGE_METRICS),
+            0, 0,
+        )
+        grid.addWidget(
+            self._tile("status", "Флаги", "Состояние станка и аварии", PAGE_FLAGS),
+            0, 1,
+        )
+        grid.addWidget(
+            self._tile("service", "GPIO", "Цифровые входы кнопок", PAGE_GPIO),
+            1, 0, 1, 2,
+        )
+        lay.addLayout(grid)
+        lay.addStretch()
+        return page
+
+    def _scroll_page(self, inner: QWidget) -> QWidget:
+        page = QWidget()
+        outer = QVBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(10)
-
-        self._bar = PageBar("Статус оборудования")
-        outer.addWidget(self._bar)
-
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        outer.addWidget(scroll, stretch=1)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+        return page
 
-        content = QWidget()
-        root = QVBoxLayout(content)
-        root.setContentsMargins(0, 0, 4, 8)
-        root.setSpacing(12)
-        scroll.setWidget(content)
+    def _build_metrics_page(self) -> QWidget:
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 4, 8)
+        lay.setSpacing(10)
 
         cards = QGridLayout()
         cards.setHorizontalSpacing(10)
@@ -70,29 +152,43 @@ class StatusScreen(QWidget):
         cards.addWidget(self._freq, 2, 0)
         cards.addWidget(self._tension, 2, 1)
         cards.addWidget(self._enc_pulses, 3, 0, 1, 2)
-        root.addLayout(cards)
+        lay.addLayout(cards)
+        lay.addStretch()
+        return self._scroll_page(inner)
 
-        flags_panel = Panel("Флаги статуса")
-        flag_grid = QGridLayout()
-        flag_grid.setHorizontalSpacing(8)
-        flag_grid.setVerticalSpacing(8)
+    def _build_flags_page(self) -> QWidget:
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 4, 8)
+        lay.setSpacing(10)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
         cols = 2
         for i, (bit, icon_name, label, alarm) in enumerate(STATUS_ITEMS):
             chip = FlagChip(icon_name, label, alarm=alarm)
             self._lamps.append((bit, chip))
-            flag_grid.addWidget(chip, i // cols, i % cols)
-        flags_panel.body_layout().addLayout(flag_grid)
-        root.addWidget(flags_panel)
+            grid.addWidget(chip, i // cols, i % cols)
+        lay.addLayout(grid)
+        lay.addStretch()
+        return self._scroll_page(inner)
 
-        gpio_panel = Panel("Цифровые входы GPIO")
-        gpio_body = gpio_panel.body_layout()
+    def _build_gpio_page(self) -> QWidget:
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 4, 8)
+        lay.setSpacing(10)
+
         self._gpio_hint = QLabel("")
         self._gpio_hint.setObjectName("hintText")
         self._gpio_hint.setWordWrap(True)
-        gpio_body.addWidget(self._gpio_hint)
-        gpio_grid = QGridLayout()
-        gpio_grid.setHorizontalSpacing(8)
-        gpio_grid.setVerticalSpacing(8)
+        lay.addWidget(self._gpio_hint)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        cols = 2
         gpio_items = [
             ("start", "play", "GPIO 23 — Старт"),
             ("stop", "stop", "GPIO 24 — Стоп"),
@@ -103,12 +199,22 @@ class StatusScreen(QWidget):
         for i, (key, icon_name, label) in enumerate(gpio_items):
             chip = FlagChip(icon_name, label)
             self._gpio_lamps[key] = chip
-            gpio_grid.addWidget(chip, i // cols, i % cols)
-        gpio_body.addLayout(gpio_grid)
-        root.addWidget(gpio_panel)
+            grid.addWidget(chip, i // cols, i % cols)
+        lay.addLayout(grid)
+        lay.addStretch()
+        return self._scroll_page(inner)
+
+    def _show_page(self, index: int) -> None:
+        self._stack.setCurrentIndex(index)
+        self._bar.set_title(_PAGE_TITLES.get(index, "Статус"))
+        self._btn_back.setVisible(index != PAGE_HUB)
+        if self._last_state_name:
+            self._bar.set_badge(self._last_state_name)
 
     def update_snapshot(self, snap: MachineSnapshot) -> None:
+        self._last_state_name = snap.state_name
         self._bar.set_badge(snap.state_name)
+
         self._state.set_value(snap.state_name)
         self._speed.set_value(f"{snap.speed_mpm:.1f}")
         self._motor.set_value(f"{snap.motor_cmd_rpm:.1f}")
