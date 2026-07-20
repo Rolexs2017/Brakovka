@@ -6,10 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
-    QLabel,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -19,13 +17,14 @@ from brakovka_hmi.bridge import LocalBridge
 from brakovka_hmi.services.poller import PollService
 from brakovka_hmi.snapshot import MachineSnapshot, StatusFlag
 from brakovka_hmi.sounds import play_alarm, play_error, play_ok
+from brakovka_hmi.ui.modern import icons as ic
 from brakovka_hmi.ui.modern import theme as t
+from brakovka_hmi.ui.modern.screen_journal import JournalScreen
 from brakovka_hmi.ui.modern.screen_main import MainScreen
-from brakovka_hmi.ui.modern.widgets import build_stylesheet, make_compact_header
-from brakovka_hmi.ui.screen_journal import JournalScreen
-from brakovka_hmi.ui.screen_roll import RollScreen
-from brakovka_hmi.ui.screen_settings import SettingsScreen
-from brakovka_hmi.ui.screen_status import StatusScreen
+from brakovka_hmi.ui.modern.screen_roll import RollScreen
+from brakovka_hmi.ui.modern.screen_settings import SettingsScreen
+from brakovka_hmi.ui.modern.screen_status import StatusScreen
+from brakovka_hmi.ui.modern.widgets import AppHeader, NavButton, build_stylesheet
 from brakovka_hmi.ui.virtual_keyboard import ask_password
 from brakovka_pi.settings import get_settings_password
 
@@ -34,16 +33,24 @@ log = logging.getLogger(__name__)
 SETTINGS_PAGE_INDEX = 2
 
 _NAV = (
-    ("Глав", 0),
-    ("Рулон", 1),
-    ("Настр.", 2),
-    ("Статус", 3),
-    ("Журнал", 4),
+    ("home", "Пульт", 0),
+    ("roll", "Рулон", 1),
+    ("settings", "Настройки", 2),
+    ("status", "Статус", 3),
+    ("journal", "Журнал", 4),
 )
+
+_PAGE_TITLES = {
+    0: ("Пульт управления", "Главный экран оператора"),
+    1: ("Рулон и длина", "Метраж и уставки"),
+    2: ("Настройки", "Параметры станка"),
+    3: ("Статус", "Оборудование и GPIO"),
+    4: ("Журнал", "События и аварии"),
+}
 
 
 class MainWindow(QMainWindow):
-    """Compact sidebar + flat theme."""
+    """Icon rail + modern screens."""
 
     def __init__(
         self,
@@ -78,41 +85,34 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(make_compact_header())
+
+        self._header = AppHeader()
+        root.addWidget(self._header)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(t.SIDEBAR_WIDTH)
-        side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(0, 8, 0, 8)
-        side_layout.setSpacing(0)
+        rail = QWidget()
+        rail.setObjectName("navRail")
+        rail.setFixedWidth(t.SIDEBAR_WIDTH)
+        side = QVBoxLayout(rail)
+        side.setContentsMargins(0, 10, 0, 10)
+        side.setSpacing(2)
 
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
-        for text, index in _NAV:
-            btn = QPushButton(text)
-            btn.setCheckable(True)
-            btn.setObjectName("navCompact")
+        for icon_name, label, index in _NAV:
+            btn = NavButton(icon_name, label)
             self._nav_group.addButton(btn, index)
-            side_layout.addWidget(btn)
-        side_layout.addStretch()
-
-        self._conn_label = QLabel("…")
-        self._conn_label.setObjectName("connPill")
-        self._conn_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._conn_label.setProperty("connected", False)
-        side_layout.addWidget(self._conn_label)
-
-        body.addWidget(sidebar)
+            side.addWidget(btn)
+        side.addStretch()
+        body.addWidget(rail)
 
         content = QWidget()
-        content.setObjectName("content")
+        content.setObjectName("contentArea")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(20, 14, 20, 14)
+        content_layout.setContentsMargins(22, 16, 22, 16)
         content_layout.setSpacing(0)
 
         self._stack = QStackedWidget()
@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
 
         self._nav_group.idClicked.connect(self._on_nav_clicked)
         self._nav_group.button(0).setChecked(True)
+        self._update_nav_icons(0)
 
         self._poller.snapshot.connect(self._on_snapshot)
         self._poller.settings.connect(self._on_settings)
@@ -152,6 +153,18 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
         else:
             self.show()
+
+    def _update_nav_icons(self, active_index: int) -> None:
+        for index, (icon_name, _label, _idx) in enumerate(_NAV):
+            btn = self._nav_group.button(index)
+            if btn is None:
+                continue
+            color = t.ACCENT if index == active_index else t.TEXT_DIM
+            btn.setIcon(ic.icon(icon_name, color=color, size=26))
+
+    def _set_page_header(self, index: int) -> None:
+        title, subtitle = _PAGE_TITLES.get(index, ("Brakovka", "HMI"))
+        self._header.set_page(title, subtitle)
 
     def _page_for_index(self, index: int):
         pages = (
@@ -182,6 +195,7 @@ class MainWindow(QMainWindow):
             btn.blockSignals(True)
             btn.setChecked(True)
             btn.blockSignals(False)
+        self._update_nav_icons(index)
 
     def _on_nav_clicked(self, index: int) -> None:
         if index == SETTINGS_PAGE_INDEX:
@@ -194,6 +208,9 @@ class MainWindow(QMainWindow):
 
         self._current_nav_index = index
         self._stack.setCurrentIndex(index)
+        self._update_nav_icons(index)
+        self._set_page_header(index)
+
         if self._cached_settings is None:
             return
         page = self._page_for_index(index)
@@ -232,15 +249,12 @@ class MainWindow(QMainWindow):
             self._page_settings.apply_settings_from_device(settings)
 
     def _on_connection(self, connected: bool) -> None:
-        self._conn_label.setProperty("connected", connected)
         if connected:
-            self._conn_label.setText("OK")
+            self._header.set_connected(True, "ONLINE")
         else:
             if self._was_connected:
                 play_error()
-            self._conn_label.setText("OFF")
-        self._conn_label.style().unpolish(self._conn_label)
-        self._conn_label.style().polish(self._conn_label)
+            self._header.set_connected(False, "OFFLINE")
         self._was_connected = connected
 
         for page in (self._page_main, self._page_roll, self._page_settings):

@@ -1,16 +1,25 @@
-"""Modern HMI palette — flat, minimal, high contrast."""
+"""Modern HMI design tokens."""
 
-BG = "#0d1117"
-PANEL = "#161b22"
-PANEL_ELEVATED = "#1c2128"
-BORDER = "#30363d"
-ACCENT = "#58a6ff"
-ACCENT_WARM = "#f78166"
-TEXT = "#e6edf3"
-TEXT_DIM = "#8b949e"
-OK = "#3fb950"
-ERROR = "#f85149"
-WARN = "#d29922"
+BG = "#0b0f14"
+BG_GRADIENT_END = "#121820"
+SURFACE = "#151c26"
+SURFACE_RAISED = "#1c2636"
+SURFACE_HOVER = "#243044"
+BORDER = "#2a3548"
+BORDER_FOCUS = "#22d3ee"
+ACCENT = "#22d3ee"
+ACCENT_DIM = "#0891b2"
+ACCENT_GLOW = "rgba(34, 211, 238, 0.18)"
+SUCCESS = "#34d399"
+ERROR = "#f87171"
+WARN = "#fbbf24"
+TEXT = "#f1f5f9"
+TEXT_DIM = "#94a3b8"
+TEXT_MUTED = "#64748b"
 
-SIDEBAR_WIDTH = 96
-HEADER_HEIGHT = 44
+SIDEBAR_WIDTH = 88
+HEADER_HEIGHT = 52
+RADIUS = 14
+RADIUS_SM = 10
+
+FONT = '"Segoe UI", "Ubuntu", "Noto Sans", sans-serif'
