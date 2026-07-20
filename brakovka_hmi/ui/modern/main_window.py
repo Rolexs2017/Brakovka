@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
             if btn is None:
                 continue
             color = t.ACCENT if index == active_index else t.TEXT_DIM
-            btn.setIcon(ic.icon(icon_name, color=color, size=26))
+            btn.setIcon(ic.icon(icon_name, color=color, size=24))
 
     def _set_page_header(self, index: int) -> None:
         title, subtitle = _PAGE_TITLES.get(index, ("Brakovka", "HMI"))

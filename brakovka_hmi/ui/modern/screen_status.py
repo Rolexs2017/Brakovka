@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from brakovka_hmi.snapshot import MachineSnapshot, StatusFlag
 from brakovka_hmi.ui.modern.widgets import FlagChip, PageBar, Panel, StatCard
@@ -27,30 +34,42 @@ class StatusScreen(QWidget):
         self._last_gpio_hint = ""
         self._last_gpio_pins: tuple[int, int, int, int, int] | None = None
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(14)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(10)
 
         self._bar = PageBar("Статус оборудования")
-        root.addWidget(self._bar)
+        outer.addWidget(self._bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(scroll, stretch=1)
+
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(0, 0, 4, 8)
+        root.setSpacing(12)
+        scroll.setWidget(content)
 
         cards = QGridLayout()
         cards.setHorizontalSpacing(10)
         cards.setVerticalSpacing(10)
-        self._state = StatCard("status", "Состояние")
-        self._speed = StatCard("speed", "Скорость", "м/мин")
-        self._motor = StatCard("motor", "Привод", "об/мин")
-        self._brake = StatCard("brake", "Тормоз", "%")
-        self._freq = StatCard("freq", "Частота ПЧ", "Гц")
-        self._tension = StatCard("tension", "Натяжение", "Н")
-        self._enc_pulses = StatCard("encoder", "Импульсы энкодера")
+        self._state = StatCard("status", "Состояние", compact=True)
+        self._speed = StatCard("speed", "Скорость", "м/мин", compact=True)
+        self._motor = StatCard("motor", "Привод", "об/мин", compact=True)
+        self._brake = StatCard("brake", "Тормоз", "%", compact=True)
+        self._freq = StatCard("freq", "Частота ПЧ", "Гц", compact=True)
+        self._tension = StatCard("tension", "Натяжение", "Н", compact=True)
+        self._enc_pulses = StatCard("encoder", "Импульсы энкодера", compact=True)
         cards.addWidget(self._state, 0, 0)
         cards.addWidget(self._speed, 0, 1)
-        cards.addWidget(self._motor, 0, 2)
-        cards.addWidget(self._brake, 1, 0)
-        cards.addWidget(self._freq, 1, 1)
-        cards.addWidget(self._tension, 1, 2)
-        cards.addWidget(self._enc_pulses, 2, 0, 1, 3)
+        cards.addWidget(self._motor, 1, 0)
+        cards.addWidget(self._brake, 1, 1)
+        cards.addWidget(self._freq, 2, 0)
+        cards.addWidget(self._tension, 2, 1)
+        cards.addWidget(self._enc_pulses, 3, 0, 1, 2)
         root.addLayout(cards)
 
         flags_panel = Panel("Флаги статуса")
@@ -84,10 +103,9 @@ class StatusScreen(QWidget):
         for i, (key, icon_name, label) in enumerate(gpio_items):
             chip = FlagChip(icon_name, label)
             self._gpio_lamps[key] = chip
-            gpio_grid.addWidget(chip, i // 2, i % 2)
+            gpio_grid.addWidget(chip, i // cols, i % cols)
         gpio_body.addLayout(gpio_grid)
         root.addWidget(gpio_panel)
-        root.addStretch()
 
     def update_snapshot(self, snap: MachineSnapshot) -> None:
         self._bar.set_badge(snap.state_name)
@@ -122,9 +140,7 @@ class StatusScreen(QWidget):
 
         if snap.gpio_available:
             factory = snap.gpio_pin_factory or "?"
-            hint = (
-                f"Зелёный — кнопка нажата (active LOW). Pin factory: {factory}."
-            )
+            hint = f"Зелёный — кнопка нажата (active LOW). Pin factory: {factory}."
         else:
             detail = snap.gpio_error.strip()
             if not detail:

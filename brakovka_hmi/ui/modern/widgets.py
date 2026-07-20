@@ -76,12 +76,14 @@ def build_stylesheet() -> str:
     QPushButton#navBtn {{
         border: none;
         border-radius: {t.RADIUS_SM}px;
-        margin: 4px 10px;
-        padding: 8px 4px 6px 4px;
+        margin: 3px 8px;
+        padding: 10px 10px 10px 8px;
         background: transparent;
         color: {t.TEXT_DIM};
-        font-size: 8pt;
+        font-size: {t.FONT_NAV}pt;
         font-weight: 600;
+        min-height: 54px;
+        text-align: left;
     }}
     QPushButton#navBtn:checked {{
         background: {t.ACCENT_GLOW};
@@ -94,6 +96,10 @@ def build_stylesheet() -> str:
     }}
     #contentArea {{
         background-color: {t.BG};
+    }}
+    QScrollArea {{
+        background: transparent;
+        border: none;
     }}
     #stateBadge {{
         font-size: 10pt;
@@ -140,7 +146,12 @@ def build_stylesheet() -> str:
     }}
     QLabel#statValue {{
         color: {t.TEXT};
-        font-size: 22pt;
+        font-size: {t.FONT_STAT_VALUE}pt;
+        font-weight: 700;
+    }}
+    QLabel#statValueCompact {{
+        color: {t.TEXT};
+        font-size: {t.FONT_STAT_VALUE_COMPACT}pt;
         font-weight: 700;
     }}
     QLabel#statUnit {{
@@ -287,7 +298,7 @@ def build_stylesheet() -> str:
     }}
     QLabel#lampText {{
         color: {t.TEXT};
-        font-size: 10pt;
+        font-size: 9pt;
     }}
     QFrame#card {{
         background-color: {t.SURFACE};
@@ -311,6 +322,7 @@ def build_stylesheet() -> str:
         background-color: {t.SURFACE};
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_SM}px;
+        min-height: 40px;
     }}
     QFrame#flagChip[active="true"] {{
         border-color: rgba(52, 211, 153, 0.55);
@@ -443,8 +455,9 @@ class NavButton(QPushButton):
         self.setObjectName("navBtn")
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setIcon(ic.icon(icon_name, color=t.TEXT_DIM, size=26))
-        self.setIconSize(ic.icon_size(26))
+        self.setMinimumHeight(54)
+        self.setIcon(ic.icon(icon_name, color=t.TEXT_DIM, size=24))
+        self.setIconSize(ic.icon_size(24))
         self.setText(label)
         self.setToolTip(label)
 
@@ -455,34 +468,40 @@ class StatCard(QFrame):
         icon_name: str,
         title: str,
         unit: str = "",
+        *,
+        compact: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("statCard")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setMinimumHeight(72 if compact else 80)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setContentsMargins(12 if compact else 14, 10, 12 if compact else 14, 10)
         layout.setSpacing(4)
 
         top = QHBoxLayout()
+        top.setSpacing(6)
         ico = QLabel()
-        ico.setPixmap(ic.icon(icon_name, color=t.ACCENT, size=22).pixmap(22, 22))
-        ico.setFixedSize(22, 22)
+        ico_sz = 20 if compact else 22
+        ico.setPixmap(ic.icon(icon_name, color=t.ACCENT, size=ico_sz).pixmap(ico_sz, ico_sz))
+        ico.setFixedSize(ico_sz, ico_sz)
         self._title = QLabel(title)
         self._title.setObjectName("statTitle")
-        top.addWidget(ico)
+        self._title.setWordWrap(True)
+        top.addWidget(ico, 0, Qt.AlignmentFlag.AlignTop)
         top.addWidget(self._title, stretch=1)
         layout.addLayout(top)
 
         val_row = QHBoxLayout()
         val_row.setSpacing(4)
         self._value = QLabel("—")
-        self._value.setObjectName("statValue")
+        self._value.setObjectName("statValueCompact" if compact else "statValue")
+        self._value.setWordWrap(True)
         unit_lbl = QLabel(unit)
         unit_lbl.setObjectName("statUnit")
-        val_row.addWidget(self._value)
+        val_row.addWidget(self._value, stretch=1)
         val_row.addWidget(unit_lbl, 0, Qt.AlignmentFlag.AlignBottom)
-        val_row.addStretch()
         layout.addLayout(val_row)
 
     def set_value(self, text: str) -> None:
@@ -602,17 +621,20 @@ class FlagChip(QFrame):
         self.setObjectName("flagChip")
         self.setProperty("active", False)
         self.setProperty("alarm", alarm)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setMinimumHeight(44)
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 8, 10, 8)
+        row.setContentsMargins(10, 10, 10, 10)
         row.setSpacing(8)
         self._ico = QLabel()
         self._ico.setFixedSize(18, 18)
+        self._ico.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._icon_name = icon_name
         self._alarm = alarm
         self._label = QLabel(label)
         self._label.setObjectName("lampText")
         self._label.setWordWrap(True)
-        row.addWidget(self._ico)
+        row.addWidget(self._ico, 0, Qt.AlignmentFlag.AlignTop)
         row.addWidget(self._label, stretch=1)
         self._refresh_icon(active=False)
 
