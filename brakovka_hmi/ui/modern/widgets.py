@@ -604,7 +604,13 @@ class StatCard(QFrame):
 
 
 class HeroCard(QFrame):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        caption: str = "Скорость линии",
+        unit: str = "м/мин",
+        icon_name: str = "speed",
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("heroCard")
         self.setProperty("heroLevel", "neutral")
@@ -613,13 +619,13 @@ class HeroCard(QFrame):
         layout.setSpacing(16)
 
         ico = QLabel()
-        ico.setPixmap(ic.icon("speed", color=t.ACCENT, size=40).pixmap(40, 40))
+        ico.setPixmap(ic.icon(icon_name, color=t.ACCENT, size=40).pixmap(40, 40))
         ico.setFixedSize(40, 40)
         layout.addWidget(ico, 0, Qt.AlignmentFlag.AlignVCenter)
 
         col = QVBoxLayout()
         col.setSpacing(0)
-        cap = QLabel("Скорость линии")
+        cap = QLabel(caption)
         cap.setObjectName("heroLabel")
         self._value = QLabel("—")
         self._value.setObjectName("heroValue")
@@ -627,11 +633,11 @@ class HeroCard(QFrame):
         f.setPointSize(44)
         f.setWeight(QFont.Weight.ExtraBold)
         self._value.setFont(f)
-        unit = QLabel("м/мин")
-        unit.setObjectName("heroUnit")
+        unit_lbl = QLabel(unit)
+        unit_lbl.setObjectName("heroUnit")
         col.addWidget(cap)
         col.addWidget(self._value)
-        col.addWidget(unit)
+        col.addWidget(unit_lbl)
         layout.addLayout(col, stretch=1)
 
     def set_value(self, text: str) -> None:
