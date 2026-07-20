@@ -78,6 +78,7 @@ class OpcUaBridge:
         self._cmd_jog = False
         self._cmd_reverse = False
         self._cmd_apply_setpoints = False
+        self._last_telem: dict[str, object] = {}
 
     async def start(self) -> None:
         await self.server.init()
@@ -227,8 +228,6 @@ class OpcUaBridge:
         self._cmd_reset_wound = bool(await h.cmd_reset_wound.read_value())
         self._cmd_apply_setpoints = bool(await h.cmd_apply_setpoints.read_value())
 
-        node_values = await self._read_all_setpoints()
-
         # First poll: skip apply (nodes already initialized from Machine).
         if not self._sp_seeded:
             self._sp_seeded = True
@@ -236,11 +235,13 @@ class OpcUaBridge:
 
         # SCADA: apply setpoints only on explicit command buttons.
         if self._cmd_apply_setpoints:
+            node_values = await self._read_all_setpoints()
             self._apply_setpoint_map(node_values)
             return
 
         # ResetRoll from SCADA: apply roll-related setpoints from OPC, then reset.
         if self._cmd_reset_roll:
+            node_values = await self._read_all_setpoints()
             self._apply_setpoint_map(node_values, keys=ROLL_SETPOINT_KEYS)
 
     async def clear_one_shots(self) -> None:
@@ -269,28 +270,53 @@ class OpcUaBridge:
             reset_wound=self._cmd_reset_wound,
         ).as_dict()
 
+    async def _write_if_changed(self, node, key: str, value: object) -> None:
+        if self._last_telem.get(key) == value:
+            return
+        await node.write_value(value)
+        self._last_telem[key] = value
+
     async def publish_telemetry(self) -> None:
         if not self.handles:
             return
         h = self.handles
         t = self.machine.telem
-        await h.state.write_value(t.state.name)
-        await h.speed_mpm.write_value(float(t.speed_mpm))
-        await h.wound_m.write_value(float(t.wound_length_m))
-        await h.brake_pct.write_value(float(t.brake_pressure_pct))
-        await h.tension_n.write_value(float(t.tension_n))
-        await h.unwind_diameter_mm.write_value(float(t.unwind_diameter_mm))
-        await h.start_diameter_mm.write_value(float(self.machine.params.start_diameter_m * 1000.0))
-        await h.encoder_error.write_value(bool(t.encoder_error))
-        await h.magnet_ok.write_value(bool(t.magnet_ok))
-        await h.watchdog_fault.write_value(bool(t.watchdog_fault))
-        await h.modbus_error.write_value(bool(t.modbus_error))
-        await h.vfd_status_word.write_value(int(t.vfd_status_word))
-        await h.vfd_error_code.write_value(int(t.vfd_error_code))
-        await h.vfd_fault.write_value(bool(t.vfd_fault))
-        await h.vfd_warning.write_value(bool(t.vfd_warning))
-        await h.vfd_freq_cmd_hz.write_value(float(t.vfd_freq_cmd_hz))
-        await h.vfd_freq_out_hz.write_value(float(t.vfd_freq_out_hz))
-        await h.emu_consumer_diameter_mm.write_value(float(t.emu_consumer_diameter_mm))
-        await h.ramp_speed_mpm.write_value(float(t.ramp_speed_mpm))
-        await h.wound_progress_pct.write_value(float(t.wound_progress_pct))
+        # Round floats so noise does not force a write every tick.
+        await self._write_if_changed(h.state, "state", t.state.name)
+        await self._write_if_changed(h.speed_mpm, "speed_mpm", round(float(t.speed_mpm), 2))
+        await self._write_if_changed(h.wound_m, "wound_m", round(float(t.wound_length_m), 2))
+        await self._write_if_changed(h.brake_pct, "brake_pct", round(float(t.brake_pressure_pct), 1))
+        await self._write_if_changed(h.tension_n, "tension_n", round(float(t.tension_n), 1))
+        await self._write_if_changed(
+            h.unwind_diameter_mm, "unwind_diameter_mm", round(float(t.unwind_diameter_mm), 1)
+        )
+        await self._write_if_changed(
+            h.start_diameter_mm,
+            "start_diameter_mm",
+            round(float(self.machine.params.start_diameter_m * 1000.0), 1),
+        )
+        await self._write_if_changed(h.encoder_error, "encoder_error", bool(t.encoder_error))
+        await self._write_if_changed(h.magnet_ok, "magnet_ok", bool(t.magnet_ok))
+        await self._write_if_changed(h.watchdog_fault, "watchdog_fault", bool(t.watchdog_fault))
+        await self._write_if_changed(h.modbus_error, "modbus_error", bool(t.modbus_error))
+        await self._write_if_changed(h.vfd_status_word, "vfd_status_word", int(t.vfd_status_word))
+        await self._write_if_changed(h.vfd_error_code, "vfd_error_code", int(t.vfd_error_code))
+        await self._write_if_changed(h.vfd_fault, "vfd_fault", bool(t.vfd_fault))
+        await self._write_if_changed(h.vfd_warning, "vfd_warning", bool(t.vfd_warning))
+        await self._write_if_changed(
+            h.vfd_freq_cmd_hz, "vfd_freq_cmd_hz", round(float(t.vfd_freq_cmd_hz), 2)
+        )
+        await self._write_if_changed(
+            h.vfd_freq_out_hz, "vfd_freq_out_hz", round(float(t.vfd_freq_out_hz), 2)
+        )
+        await self._write_if_changed(
+            h.emu_consumer_diameter_mm,
+            "emu_consumer_diameter_mm",
+            round(float(t.emu_consumer_diameter_mm), 1),
+        )
+        await self._write_if_changed(
+            h.ramp_speed_mpm, "ramp_speed_mpm", round(float(t.ramp_speed_mpm), 2)
+        )
+        await self._write_if_changed(
+            h.wound_progress_pct, "wound_progress_pct", round(float(t.wound_progress_pct), 1)
+        )

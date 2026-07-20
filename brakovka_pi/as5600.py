@@ -49,8 +49,8 @@ class As5600:
             self.open()
 
         assert self._bus is not None
-        status = int(self._bus.read_byte_data(self._addr, REG_STATUS)) & 0xFF
-        hi = int(self._bus.read_byte_data(self._addr, REG_RAW_ANGLE_H)) & 0xFF
-        lo = int(self._bus.read_byte_data(self._addr, REG_RAW_ANGLE_L)) & 0xFF
-        raw = ((hi << 8) | lo) & 0x0FFF
+        # STATUS (0x0B) + RAW_ANGLE H/L (0x0C/0x0D) in one I2C transaction.
+        block = self._bus.read_i2c_block_data(self._addr, REG_STATUS, 3)
+        status = int(block[0]) & 0xFF
+        raw = ((int(block[1]) << 8) | int(block[2])) & 0x0FFF
         return As5600Sample(raw=raw, status=status)

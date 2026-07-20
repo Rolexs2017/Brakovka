@@ -299,10 +299,15 @@ class Encoder:
 
 class ThreadedEncoder:
     """
-    Dedicated thread: AS5600 I2C polling at the maximum sustainable rate.
+    Dedicated thread: AS5600 I2C polling capped at ~1 kHz.
 
-    Accumulates pulses and meterage only; speed is derived in the controller task.
+    I2C runs outside the lock so controller snapshot()/setters are not blocked
+    by bus latency. Accumulates pulses and meterage only; speed is derived
+    in the controller task.
     """
+
+    # Cap poll rate to avoid busy-spinning a core on fast I2C.
+    _MIN_PERIOD_S = 0.001
 
     def __init__(self, encoder: Encoder) -> None:
         self._enc = encoder
@@ -323,7 +328,7 @@ class ThreadedEncoder:
             daemon=True,
         )
         self._thread.start()
-        log.info("Encoder thread started (max I2C poll rate)")
+        log.info("Encoder thread started (I2C poll ≤ %.0f Hz)", 1.0 / self._MIN_PERIOD_S)
 
     def stop(self, timeout_s: float = 2.0) -> None:
         self._stop.set()
@@ -364,9 +369,11 @@ class ThreadedEncoder:
     def _run(self) -> None:
         last_t = monotonic()
         while not self._stop.is_set():
-            now = monotonic()
+            loop_t0 = monotonic()
+            now = loop_t0
             dt = now - last_t
             if dt < 1e-5:
+                self._stop.wait(0.0005)
                 continue
             last_t = now
             dt = min(dt, 0.5)
@@ -378,4 +385,13 @@ class ThreadedEncoder:
                 if self._pending_reset_wound:
                     self._enc.reset_wound()
                     self._pending_reset_wound = False
-                self._telem = self._enc.poll(dt, wound_enable=True)
+
+            # I2C outside the lock — snapshot()/setters stay responsive.
+            telem = self._enc.poll(dt, wound_enable=True)
+
+            with self._lock:
+                self._telem = telem
+
+            remain = self._MIN_PERIOD_S - (monotonic() - loop_t0)
+            if remain > 0.0:
+                self._stop.wait(remain)

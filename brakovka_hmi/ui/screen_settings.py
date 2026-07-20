@@ -537,7 +537,7 @@ class SettingsScreen(EditableFormMixin, QWidget):
     def update_snapshot(self, snap: MachineSnapshot) -> None:
         self._last_pulses = int(snap.encoder_pulses)
         self._cal_pulses.setText(f"Импульсы: {self._last_pulses}")
-        if snap.connected:
+        if snap.connected and self._stack.currentIndex() == PAGE_PID_TREND:
             self._pid_trend.push(float(snap.speed_mpm), float(snap.pid_out_pct))
         moving = snap.state in MOVING_STATES
         idle = snap.state == MachineState.IDLE

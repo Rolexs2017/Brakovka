@@ -86,6 +86,8 @@ class ValueCard(QFrame):
         layout.addLayout(row)
 
     def set_value(self, text: str) -> None:
+        if self._value.text() == text:
+            return
         self._value.setText(text)
 
 
@@ -101,6 +103,7 @@ class StatusLamp(QWidget):
         dot_font = QFont(self.font())
         dot_font.setPointSize(12)
         self._dot.setFont(dot_font)
+        self._active: bool | None = None
         self._set_dot_active(False)
 
         self._text = QLabel(label)
@@ -112,6 +115,9 @@ class StatusLamp(QWidget):
         layout.addWidget(self._text, 1)
 
     def _set_dot_active(self, active: bool) -> None:
+        if self._active is active:
+            return
+        self._active = active
         color = t.OK if active else "#334155"
         self._dot.setStyleSheet(f"color: {color};")
 
@@ -119,6 +125,8 @@ class StatusLamp(QWidget):
         self._set_dot_active(active)
 
     def set_label(self, text: str) -> None:
+        if self._text.text() == text:
+            return
         self._text.setText(text)
 
 

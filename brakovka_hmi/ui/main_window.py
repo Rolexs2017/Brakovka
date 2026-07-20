@@ -208,10 +208,10 @@ class MainWindow(QMainWindow):
     def _on_snapshot(self, snap: object) -> None:
         if not isinstance(snap, MachineSnapshot):
             return
-        self._page_main.update_snapshot(snap)
-        self._page_roll.update_snapshot(snap)
-        self._page_status.update_snapshot(snap)
-        self._page_settings.update_snapshot(snap)
+        # Update only the visible page — hidden screens do not need 5 Hz refresh.
+        page = self._page_for_index(self._stack.currentIndex())
+        if page is not None and hasattr(page, "update_snapshot"):
+            page.update_snapshot(snap)
         self._check_alarms(snap)
 
     def _check_alarms(self, snap: MachineSnapshot) -> None:

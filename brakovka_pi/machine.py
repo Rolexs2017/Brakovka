@@ -104,6 +104,8 @@ class Machine:
     brake_until_t: float = 0.0
     _ramp_speed_mpm: float = 0.0
     _pid_speed: Pid = field(default_factory=lambda: Pid(kp=5.0, ti=2.0, kd=0.0, out_min=0.0, out_max=320.0))
+    _cached_tune_method: str = ""
+    _cached_pi_ff: bool = False
 
     def is_motion_active(self) -> bool:
         return self.telem.state in MOVING_STATES
@@ -324,30 +326,34 @@ class Machine:
         d0 = max(self.params.core_diameter_m, self.params.start_diameter_m)
         self.telem.unwind_diameter_mm = d0 * 1000.0
 
-    def calc_tension_n(self, brake_pct: float) -> float:
+    def calc_tension_n(self, brake_pct: float, *, diameter_m: float | None = None) -> float:
         """
         Натяжение без датчика — жёсткая геометрия (железо и эмуляция одинаково):
 
         T = (brake_pct / 100) * gain * (D0 / D)
         """
-        d = self.unwind_diameter_m()
+        d = self.unwind_diameter_m() if diameter_m is None else float(diameter_m)
         d0 = max(self.params.core_diameter_m, self.params.start_diameter_m)
         ratio = d0 / max(d, self.params.core_diameter_m)
         gain = self.params.tension_brake_gain_n
         return max(0.0, (max(0.0, brake_pct) / 100.0) * gain * ratio)
 
-    def tension_feedforward_pct(self, setpoint_n: float) -> float:
+    def tension_feedforward_pct(
+        self, setpoint_n: float, *, diameter_m: float | None = None
+    ) -> float:
         """PWM для заданного натяжения при текущем диаметре (без PID)."""
-        d = self.unwind_diameter_m()
+        d = self.unwind_diameter_m() if diameter_m is None else float(diameter_m)
         d0 = max(self.params.core_diameter_m, self.params.start_diameter_m)
         denom = self.params.tension_brake_gain_n * (d0 / max(d, self.params.core_diameter_m))
         if denom <= 1e-6:
             return self.params.tension_brake_min_pct
         return (setpoint_n / denom) * 100.0
 
-    def tension_brake_command_pct(self) -> float:
+    def tension_brake_command_pct(self, *, diameter_m: float | None = None) -> float:
         """Только feedforward от уставки и диаметра."""
-        out = self.tension_feedforward_pct(self.params.tension_setpoint_n)
+        out = self.tension_feedforward_pct(
+            self.params.tension_setpoint_n, diameter_m=diameter_m
+        )
         out_min = self.params.tension_brake_min_pct
         out_max = self.params.brake_max_pressure_pct
         if out < out_min:
@@ -365,7 +371,13 @@ class Machine:
         return max(0.0, min(self.params.brake_max_pressure_pct, tension_brake_pct))
 
     def uses_pi_feedforward(self) -> bool:
-        return parse_pid_tune_method(self.params.pid_tune_method) == PidTuneMethod.PI_FF.value
+        method = self.params.pid_tune_method
+        if method != self._cached_tune_method:
+            self._cached_tune_method = method
+            self._cached_pi_ff = (
+                parse_pid_tune_method(method) == PidTuneMethod.PI_FF.value
+            )
+        return self._cached_pi_ff
 
     def effective_mpm_per_hz(self) -> float:
         if self.uses_pi_feedforward():

@@ -25,6 +25,8 @@ class StatusScreen(QWidget):
         super().__init__(parent)
         self._lamps: list[tuple[StatusFlag, StatusLamp]] = []
         self._gpio_lamps: dict[str, StatusLamp] = {}
+        self._last_gpio_hint = ""
+        self._last_gpio_pins: tuple[int, int, int, int, int] | None = None
 
         root = QVBoxLayout(self)
         root.setSpacing(8)
@@ -104,20 +106,26 @@ class StatusScreen(QWidget):
         for bit, lamp in self._lamps:
             lamp.set_active(bool(flags & bit))
 
-        # Labels follow pins from settings (defaults match 23/24/25/8/7).
-        self._gpio_lamps["start"].set_label(f"GPIO {snap.gpio_pin_start} — Старт")
-        self._gpio_lamps["stop"].set_label(f"GPIO {snap.gpio_pin_stop} — Стоп")
-        self._gpio_lamps["jog"].set_label(f"GPIO {snap.gpio_pin_jog} — JOG")
-        self._gpio_lamps["reverse"].set_label(
-            f"GPIO {snap.gpio_pin_reverse} — Реверс"
+        pins = (
+            snap.gpio_pin_start,
+            snap.gpio_pin_stop,
+            snap.gpio_pin_jog,
+            snap.gpio_pin_reverse,
+            snap.gpio_pin_reset_wound,
         )
-        self._gpio_lamps["reset_wound"].set_label(
-            f"GPIO {snap.gpio_pin_reset_wound} — Сброс метража потребителя"
-        )
+        if pins != self._last_gpio_pins:
+            self._last_gpio_pins = pins
+            self._gpio_lamps["start"].set_label(f"GPIO {pins[0]} — Старт")
+            self._gpio_lamps["stop"].set_label(f"GPIO {pins[1]} — Стоп")
+            self._gpio_lamps["jog"].set_label(f"GPIO {pins[2]} — JOG")
+            self._gpio_lamps["reverse"].set_label(f"GPIO {pins[3]} — Реверс")
+            self._gpio_lamps["reset_wound"].set_label(
+                f"GPIO {pins[4]} — Сброс метража потребителя"
+            )
 
         if snap.gpio_available:
             factory = snap.gpio_pin_factory or "?"
-            self._gpio_hint.setText(
+            hint = (
                 f"Зелёный — кнопка нажата (active LOW). Pin factory: {factory}. "
                 "Работают и в режиме эмуляции ПЧ/энкодера."
             )
@@ -127,10 +135,11 @@ class StatusScreen(QWidget):
                 if not snap.connected:
                     detail = "нет связи с контроллером"
                 else:
-                    detail = (
-                        "контроллер не опубликовал уровни GPIO"
-                    )
-            self._gpio_hint.setText(f"GPIO недоступен: {detail}")
+                    detail = "контроллер не опубликовал уровни GPIO"
+            hint = f"GPIO недоступен: {detail}"
+        if hint != self._last_gpio_hint:
+            self._last_gpio_hint = hint
+            self._gpio_hint.setText(hint)
 
         self._gpio_lamps["start"].set_active(snap.gpio_available and snap.gpio_start)
         self._gpio_lamps["stop"].set_active(snap.gpio_available and snap.gpio_stop)

@@ -72,9 +72,11 @@ class DualTrendPlot(QWidget):
 
         now = self._buf[-1][0]
         t0 = now - self._window_s
-        speeds = [s for _, s, _ in self._buf]
-        pcts = [c for _, _, c in self._buf]
-        speed_max = max(10.0, max(speeds) * 1.15, 1.0)
+        speed_max = 10.0
+        for _, s, _ in self._buf:
+            if s > speed_max:
+                speed_max = s
+        speed_max = max(10.0, speed_max * 1.15)
         pct_max = 100.0
 
         # Grid
