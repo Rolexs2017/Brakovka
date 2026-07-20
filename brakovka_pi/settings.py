@@ -17,6 +17,7 @@ class Settings:
     machine: dict[str, Any]
     emu: dict[str, Any]
     ui: dict[str, Any]
+    encoder: dict[str, Any]
 
 
 def settings_path() -> Path:
@@ -46,7 +47,7 @@ def load_settings() -> Settings:
     if os.getenv("BRAKOVKA_EMU", "0") == "1":
         data["emulator"] = True
 
-    for k in ("gpio", "serial", "opcua", "timing", "machine", "emu", "ui"):
+    for k in ("gpio", "serial", "opcua", "timing", "machine", "emu", "ui", "encoder"):
         data.setdefault(k, {})
 
     return Settings(
@@ -58,6 +59,7 @@ def load_settings() -> Settings:
         machine=dict(data["machine"]),
         emu=dict(data["emu"]),
         ui=dict(data["ui"]),
+        encoder=dict(data["encoder"]),
     )
 
 

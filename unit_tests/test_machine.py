@@ -79,11 +79,30 @@ class TestMachineStateMachine(unittest.TestCase):
         m = Machine()
         m.params.target_length_m = 100.0
         m.params.slowdown_start_pct = 90.0
+        m.params.slowdown_exit_pct = 85.0
         m.telem.state = MachineState.RUN
         m.telem.wound_length_m = 91.0
         m.update_state(Inputs(estop_ok=True))
         self.assertEqual(m.telem.state, MachineState.SLOWDOWN)
         self.assertIn(m.telem.state, RUN_LIKE_STATES)
+
+    def test_slowdown_hysteresis(self) -> None:
+        m = Machine()
+        m.params.target_length_m = 100.0
+        m.params.slowdown_start_pct = 90.0
+        m.params.slowdown_exit_pct = 85.0
+        m.telem.state = MachineState.RUN
+        m.telem.wound_length_m = 91.0
+        m.update_state(Inputs(estop_ok=True))
+        self.assertEqual(m.telem.state, MachineState.SLOWDOWN)
+
+        m.telem.wound_length_m = 88.0
+        m.update_state(Inputs(estop_ok=True))
+        self.assertEqual(m.telem.state, MachineState.SLOWDOWN)
+
+        m.telem.wound_length_m = 84.0
+        m.update_state(Inputs(estop_ok=True))
+        self.assertEqual(m.telem.state, MachineState.RUN)
 
     def test_jog_release_stops(self) -> None:
         m = Machine()

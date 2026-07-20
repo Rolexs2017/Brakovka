@@ -99,6 +99,13 @@ _SETPOINT_LIST: tuple[SetpointDef, ...] = (
         persist=True,
     ),
     _sp(
+        "slowdown_exit_pct",
+        opc_name="SlowdownExit_pct",
+        lo=0.0,
+        hi=100.0,
+        persist=True,
+    ),
+    _sp(
         "accel_time_s",
         ui_key="accel_sec",
         opc_name="AccelTime_s",

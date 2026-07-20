@@ -11,6 +11,7 @@ from .commands import merge_command_dicts
 from .config import load_runtime_config, resolve_emulator
 from .encoder import (
     Encoder,
+    EncoderFaultGate,
     PID_REGULATOR_SPEED_MEDIAN_N,
     SPEED_DISPLAY_TAU_S,
     SPEED_LENGTH_WINDOW_S,
@@ -194,7 +195,7 @@ async def run_controller(
 
     ``gpio`` may be pre-created on the main thread (recommended with Qt HMI).
     """
-    emu_from_file, gpio_cfg, serial_cfg, vfd_cfg, opcua_cfg, timing_cfg, machine_cfg, emu_cfg = (
+    emu_from_file, gpio_cfg, serial_cfg, vfd_cfg, opcua_cfg, timing_cfg, machine_cfg, emu_cfg, encoder_cfg = (
         load_runtime_config()
     )
     m = Machine()
@@ -265,8 +266,19 @@ async def run_controller(
             spike_threshold_m=m.params.encoder_spike_m,
             max_speed_mpm=m.params.max_ramp_speed_mpm,
             invert=m.params.encoder_invert,
+            i2c_bus=encoder_cfg.i2c_bus,
+            i2c_address=encoder_cfg.i2c_address,
+            i2c_retries=encoder_cfg.i2c_retries,
+            i2c_retry_delay_s=encoder_cfg.i2c_retry_delay_s,
         )
-        enc_thread = ThreadedEncoder(enc_hw)
+        enc_thread = ThreadedEncoder(
+            enc_hw,
+            fault_gate=EncoderFaultGate(
+                fault_streak=encoder_cfg.fault_streak,
+                recover_streak=encoder_cfg.recover_streak,
+            ),
+            poll_min_period_s=encoder_cfg.poll_min_period_s,
+        )
         enc_thread.start()
         encoder = enc_thread
         machine_log.info("Hardware encoder in dedicated thread (I2C poll ≤ 1 kHz)")
@@ -423,9 +435,13 @@ async def run_controller(
                         prev_state = state
 
                     if m.telem.encoder_error and not prev_encoder_error:
-                        machine_log.error("Encoder error")
+                        machine_log.error(
+                            "Encoder fault latched (I2C: retries=%d fault_streak=%d)",
+                            encoder_cfg.i2c_retries,
+                            encoder_cfg.fault_streak,
+                        )
                     elif not m.telem.encoder_error and prev_encoder_error:
-                        machine_log.info("Encoder recovered")
+                        machine_log.info("Encoder fault cleared")
                     prev_encoder_error = m.telem.encoder_error
 
                     clean_mpm = speed_outlier.update(last_speed_mpm)

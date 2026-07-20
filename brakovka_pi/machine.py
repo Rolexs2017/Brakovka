@@ -37,6 +37,7 @@ class MachineParams:
     reverse_speed_mpm: float = 15.0
     slowdown_speed_mpm: float = 20.0
     slowdown_start_pct: float = 90.0
+    slowdown_exit_pct: float = 85.0
 
     brake_delay_s: float = 3.0
     brake_max_pressure_pct: float = 100.0
@@ -123,6 +124,11 @@ class Machine:
         if self.params.target_length_m <= 1e-6:
             return False
         return self.wound_progress_pct() >= self.params.slowdown_start_pct
+
+    def should_exit_slowdown(self) -> bool:
+        if self.params.target_length_m <= 1e-6:
+            return True
+        return self.wound_progress_pct() < self.params.slowdown_exit_pct
 
     def should_stop_at_target_length(self) -> bool:
         if self.params.target_length_m <= 1e-6:
@@ -238,7 +244,7 @@ class Machine:
             )
             if stop_request:
                 self._enter_stopping()
-            elif not self.should_enter_slowdown():
+            elif self.should_exit_slowdown():
                 self.telem.state = MachineState.RUN
         elif st == MachineState.JOG:
             if (not inp.jog_level) or fault_block:
@@ -470,6 +476,18 @@ class Machine:
             return
         if name == "encoder_invert":
             self.params.encoder_invert = bool(clamp(name, value))
+            return
+        if name == "slowdown_start_pct":
+            self.params.slowdown_start_pct = clamp(name, value)
+            if self.params.slowdown_exit_pct >= self.params.slowdown_start_pct:
+                self.params.slowdown_exit_pct = max(
+                    0.0, self.params.slowdown_start_pct - 1.0
+                )
+            return
+        if name == "slowdown_exit_pct":
+            self.params.slowdown_exit_pct = min(
+                clamp(name, value), self.params.slowdown_start_pct - 0.1
+            )
             return
 
         sp = SETPOINTS[name]

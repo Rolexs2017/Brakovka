@@ -5,6 +5,7 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
+from .as5600 import AS5600_ADDR
 from .pid_tune import parse_pid_tune_method
 from .setpoints import SETPOINTS, clamp as sp_clamp
 from .settings import load_settings
@@ -113,6 +114,7 @@ class MachineConfig:
     speed_setpoint_mpm: float = 100.0
     slowdown_speed_mpm: float = 20.0
     slowdown_start_pct: float = 90.0
+    slowdown_exit_pct: float = 85.0
     accel_time_s: float = 15.0
     decel_time_s: float = 10.0
     jog_speed_mpm: float = 10.0
@@ -143,6 +145,7 @@ class MachineConfig:
         p.speed_setpoint_mpm = self.speed_setpoint_mpm
         p.slowdown_speed_mpm = self.slowdown_speed_mpm
         p.slowdown_start_pct = self.slowdown_start_pct
+        p.slowdown_exit_pct = min(self.slowdown_exit_pct, self.slowdown_start_pct - 0.1)
         p.accel_time_s = self.accel_time_s
         p.decel_time_s = self.decel_time_s
         p.jog_speed_mpm = self.jog_speed_mpm
@@ -162,6 +165,17 @@ class MachineConfig:
         p.emu_motor_rpm_per_hz = self.emu_motor_rpm_per_hz
         machine.sync_start_diameter_from_roll_length()
         machine.telem.unwind_diameter_mm = machine.params.start_diameter_m * 1000.0
+
+
+@dataclass(frozen=True)
+class EncoderConfig:
+    i2c_bus: int = 1
+    i2c_address: int = AS5600_ADDR
+    i2c_retries: int = 2
+    i2c_retry_delay_s: float = 0.0005
+    fault_streak: int = 5
+    recover_streak: int = 3
+    poll_min_period_s: float = 0.001
 
 
 @dataclass(frozen=True)
@@ -264,6 +278,15 @@ def load_runtime_config():
         slowdown_start_pct=_machine_clamp(
             "slowdown_start_pct", float(machine_raw.get("slowdown_start_pct", 90.0))
         ),
+        slowdown_exit_pct=min(
+            _machine_clamp(
+                "slowdown_exit_pct", float(machine_raw.get("slowdown_exit_pct", 85.0))
+            ),
+            _machine_clamp(
+                "slowdown_start_pct", float(machine_raw.get("slowdown_start_pct", 90.0))
+            )
+            - 0.1,
+        ),
         accel_time_s=_machine_clamp(
             "accel_time_s", float(machine_raw.get("accel_time_s", 15.0))
         ),
@@ -315,4 +338,16 @@ def load_runtime_config():
     )
 
     emu = dict(s.emu)
-    return s.emulator, gpio, serial, vfd, opcua, timing, machine, emu
+
+    enc_raw = s.encoder
+    encoder = EncoderConfig(
+        i2c_bus=max(0, int(enc_raw.get("i2c_bus", 1))),
+        i2c_address=int(enc_raw.get("i2c_address", AS5600_ADDR)),
+        i2c_retries=max(0, int(enc_raw.get("i2c_retries", 2))),
+        i2c_retry_delay_s=_clamp(float(enc_raw.get("i2c_retry_delay_s", 0.0005)), 0.0, 0.05),
+        fault_streak=max(1, int(enc_raw.get("fault_streak", 5))),
+        recover_streak=max(1, int(enc_raw.get("recover_streak", 3))),
+        poll_min_period_s=_clamp(float(enc_raw.get("poll_min_period_s", 0.001)), 0.0005, 0.05),
+    )
+
+    return s.emulator, gpio, serial, vfd, opcua, timing, machine, emu, encoder

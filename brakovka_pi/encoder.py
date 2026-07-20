@@ -154,6 +154,60 @@ class SpeedMedianFilter:
         return self.value_mpm
 
 
+class EncoderFaultGate:
+    """
+    Debounce AS5600 I2C glitches before exposing encoder_error.
+
+    Transient read failures hold the last good meterage and keep ok=True until
+    ``fault_streak`` consecutive failures; recovery needs ``recover_streak`` OK reads.
+    """
+
+    def __init__(self, *, fault_streak: int = 5, recover_streak: int = 3) -> None:
+        self._fault_streak = max(1, int(fault_streak))
+        self._recover_streak = max(1, int(recover_streak))
+        self._bad = 0
+        self._good = 0
+        self._latched_fault = False
+        self._last_good = EncoderTelemetry()
+
+    @property
+    def latched_fault(self) -> bool:
+        return self._latched_fault
+
+    @property
+    def fault_streak(self) -> int:
+        return self._fault_streak
+
+    @property
+    def recover_streak(self) -> int:
+        return self._recover_streak
+
+    def reset(self) -> None:
+        self._bad = 0
+        self._good = 0
+        self._latched_fault = False
+        self._last_good = EncoderTelemetry()
+
+    def update(self, sample_ok: bool, telem: EncoderTelemetry) -> EncoderTelemetry:
+        if sample_ok:
+            self._bad = 0
+            self._good += 1
+            self._last_good = telem
+            if self._latched_fault and self._good >= self._recover_streak:
+                self._latched_fault = False
+        else:
+            self._good = 0
+            self._bad += 1
+            if self._bad >= self._fault_streak:
+                self._latched_fault = True
+
+        if self._latched_fault:
+            return replace(self._last_good, ok=False)
+        if sample_ok:
+            return replace(telem, ok=True)
+        return replace(self._last_good, ok=True)
+
+
 class SpeedDisplayFilter:
     """
     Extra 1st-order low-pass for HMI / OPC telemetry only.
@@ -196,8 +250,18 @@ class Encoder:
         spike_threshold_m: float = 2.0,
         max_speed_mpm: float = 300.0,
         invert: bool = False,
+        *,
+        i2c_bus: int = 1,
+        i2c_address: int = AS5600_ADDR,
+        i2c_retries: int = 2,
+        i2c_retry_delay_s: float = 0.0005,
     ) -> None:
-        self._as = As5600(bus=1, address=AS5600_ADDR)
+        self._as = As5600(
+            bus=i2c_bus,
+            address=i2c_address,
+            retries=i2c_retries,
+            retry_delay_s=i2c_retry_delay_s,
+        )
         self._prev_raw: int | None = None
         self._unwind_pulses = 0
         self._wound_pulses = 0
@@ -252,25 +316,27 @@ class Encoder:
             magnet_ok=magnet_ok,
         )
 
-    def poll(self, dt_s: float, *, wound_enable: bool = True) -> EncoderTelemetry:
+    def poll(self, dt_s: float, *, wound_enable: bool = True) -> tuple[EncoderTelemetry, bool]:
         """
         One AS5600 sample: unwrap angle → pulses → meterage.
 
+        Returns (telemetry, sample_ok). ``sample_ok`` is False on I2C failure.
         Speed is **not** calculated here; the controller derives it from wound_m.
         """
         if dt_s <= 0:
-            return self._telem(ok=True)
+            telem = self._telem(ok=True)
+            return telem, True
 
         try:
             s = self._as.read()
         except Exception:
-            return self._telem(ok=False, magnet_ok=False)
+            return self._telem(ok=False, magnet_ok=False), False
 
         magnet_ok = bool(s.status & STATUS_MD)
         raw = int(s.raw) & 0x0FFF
         if self._prev_raw is None:
             self._prev_raw = raw
-            return self._telem(ok=True, magnet_ok=magnet_ok)
+            return self._telem(ok=True, magnet_ok=magnet_ok), True
 
         delta = raw - self._prev_raw
         self._prev_raw = raw
@@ -294,7 +360,7 @@ class Encoder:
             if wound_enable:
                 self._wound_pulses = max(0, self._wound_pulses + signed)
 
-        return self._telem(ok=True, magnet_ok=magnet_ok)
+        return self._telem(ok=True, magnet_ok=magnet_ok), True
 
 
 class ThreadedEncoder:
@@ -306,11 +372,16 @@ class ThreadedEncoder:
     in the controller task.
     """
 
-    # Cap poll rate to avoid busy-spinning a core on fast I2C.
-    _MIN_PERIOD_S = 0.001
-
-    def __init__(self, encoder: Encoder) -> None:
+    def __init__(
+        self,
+        encoder: Encoder,
+        *,
+        fault_gate: EncoderFaultGate | None = None,
+        poll_min_period_s: float = 0.001,
+    ) -> None:
         self._enc = encoder
+        self._gate = fault_gate or EncoderFaultGate()
+        self._poll_min_period_s = max(0.0005, float(poll_min_period_s))
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -328,7 +399,12 @@ class ThreadedEncoder:
             daemon=True,
         )
         self._thread.start()
-        log.info("Encoder thread started (I2C poll ≤ %.0f Hz)", 1.0 / self._MIN_PERIOD_S)
+        log.info(
+            "Encoder thread started (I2C poll ≤ %.0f Hz, fault_streak=%d recover_streak=%d)",
+            1.0 / self._poll_min_period_s,
+            self._gate.fault_streak,
+            self._gate.recover_streak,
+        )
 
     def stop(self, timeout_s: float = 2.0) -> None:
         self._stop.set()
@@ -361,10 +437,12 @@ class ThreadedEncoder:
     def reset_unwind(self) -> None:
         with self._lock:
             self._pending_reset_unwind = True
+            self._gate.reset()
 
     def reset_wound(self) -> None:
         with self._lock:
             self._pending_reset_wound = True
+            self._gate.reset()
 
     def _run(self) -> None:
         last_t = monotonic()
@@ -387,11 +465,12 @@ class ThreadedEncoder:
                     self._pending_reset_wound = False
 
             # I2C outside the lock — snapshot()/setters stay responsive.
-            telem = self._enc.poll(dt, wound_enable=True)
+            raw_telem, sample_ok = self._enc.poll(dt, wound_enable=True)
+            telem = self._gate.update(sample_ok, raw_telem)
 
             with self._lock:
                 self._telem = telem
 
-            remain = self._MIN_PERIOD_S - (monotonic() - loop_t0)
+            remain = self._poll_min_period_s - (monotonic() - loop_t0)
             if remain > 0.0:
                 self._stop.wait(remain)

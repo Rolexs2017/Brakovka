@@ -40,6 +40,15 @@
     "vfd_cmd_min_delta_hz": 0.05,
     "watchdog_limit_s": 5.0
   },
+  "encoder": {
+    "i2c_bus": 1,
+    "i2c_address": 54,
+    "i2c_retries": 2,
+    "i2c_retry_delay_s": 0.0005,
+    "fault_streak": 5,
+    "recover_streak": 3,
+    "poll_min_period_s": 0.001
+  },
   "emu": {
     "gear_ratio": 0.2
   },
@@ -54,6 +63,7 @@
     "speed_setpoint_mpm": 100.0,
     "slowdown_speed_mpm": 20.0,
     "slowdown_start_pct": 90.0,
+    "slowdown_exit_pct": 85.0,
     "accel_time_s": 15.0,
     "decel_time_s": 10.0,
     "jog_speed_mpm": 10.0,
