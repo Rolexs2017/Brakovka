@@ -1,0 +1,79 @@
+VariableName;VariableType;IsRetain;DefaultValue;Comment;MetaType;CatalogPath
+Имя переменной;Тип переменной;Энергонезависимость;Значение по умолчанию;Комментарий;Метатип;Путь в каталоге
+xEnable;Boolean;No;0;Разрешение работы FB_Brakovka;Ram;Brakovka/01_Система
+iTaskPeriod_ms;Long;No;10;Период задачи холста с FB_Brakovka, мс;Ram;Brakovka/01_Система
+xCmdStart;Boolean;No;0;Импульс Пуск (фронт);Ram;Brakovka/02_Команды
+xCmdStop;Boolean;No;0;Импульс Стоп (фронт);Ram;Brakovka/02_Команды
+xCmdJog;Boolean;No;0;Уровень Толчок;Ram;Brakovka/02_Команды
+xCmdReverse;Boolean;No;0;Уровень Реверс;Ram;Brakovka/02_Команды
+xCmdResetRoll;Boolean;No;0;Импульс сброс рулона (только IDLE);Ram;Brakovka/02_Команды
+xCmdResetWound;Boolean;No;0;Импульс сброс намотки (только IDLE);Ram;Brakovka/02_Команды
+xCmdAutotune;Boolean;No;0;Импульс автонастройки PI+FF (только IDLE);Ram;Brakovka/02_Команды
+xEstopOk;Boolean;No;1;Цепь E-STOP замкнута (1=OK);Ram;Brakovka/03_Аварии
+xEncFault;Boolean;No;0;Авария энкодера;Ram;Brakovka/03_Аварии
+xVfdFault;Boolean;No;0;Авария ПЧ;Ram;Brakovka/03_Аварии
+xModbusFault;Boolean;No;0;Авария связи Modbus;Ram;Brakovka/03_Аварии
+udiEncPulseCount;Long;No;0;Счётчик импульсов энкодера (накопительный);Ram;Brakovka/04_Энкодер
+rMetersPerPulse;Float;Yes;0.01;Метров на импульс (0.01 = 1 см);Ram;Brakovka/04_Энкодер
+xEncInvert;Boolean;Yes;0;Инверсия направления энкодера;Ram;Brakovka/04_Энкодер
+xEmulatorEnable;Boolean;Yes;0;1=эмуляция (без реального VFD/энкодера);Ram;Brakovka/05_Эмуляция
+rEmuGearRatio;Float;Yes;20;Эмуляция: передаточное число редуктора;Ram;Brakovka/05_Эмуляция
+rEmuMotorRpmPerHz;Float;Yes;60;Эмуляция: rpm двигателя на 1 Гц ПЧ;Ram;Brakovka/05_Эмуляция
+rEmuSpeedTau_s;Float;Yes;0.15;Эмуляция: инерция скорости, с;Ram;Brakovka/05_Эмуляция
+xEmulatorActive;Boolean;No;0;Эмуляция активна (выход);Ram;Brakovka/05_Эмуляция
+udiVfdStatusWord;Long;No;0;Статусное слово ПЧ (bit0 run bit3 rev);Ram;Brakovka/05_Эмуляция
+rVfdFreqOut_Hz;Float;No;0;Фактическая частота ПЧ (Modbus/эмуляция);Ram;Brakovka/05_Эмуляция
+rSimSpeed_mpm;Float;No;0;Симулированная линейная скорость, м/мин;Ram;Brakovka/05_Эмуляция
+rConsumerDiameter_mm;Float;No;0;Диаметр намотки потребителя (эмуляция), мм;Ram;Brakovka/05_Эмуляция
+rMaterialThickness_mm;Float;Yes;0.05;Толщина материала, мм;Ram;Brakovka/06_Рулон
+udiRollLength_m;Long;Yes;500;Метраж загруженного рулона размотки, м;Ram;Brakovka/06_Рулон
+rCoreDiameter_mm;Float;Yes;76;Диаметр гильзы, мм;Ram;Brakovka/06_Рулон
+rTensionSetpoint_N;Float;Yes;150;Уставка натяжения размотки, Н;Ram;Brakovka/07_Тормоз
+rBrakeGain_N;Float;Yes;500;Натяжение при 100% тормоза и D=Dstart, Н;Ram;Brakovka/07_Тормоз
+rBrakeMin_pct;Float;Yes;2;Минимальный выход тормоза, %;Ram;Brakovka/07_Тормоз
+rBrakeMax_pct;Float;Yes;100;Максимальный выход тормоза, %;Ram;Brakovka/07_Тормоз
+rSpeedSetpoint_mpm;Float;Yes;100;Уставка скорости RUN, м/мин;Ram;Brakovka/08_Скорость
+rJogSpeed_mpm;Float;Yes;10;Скорость толчка JOG, м/мин;Ram;Brakovka/08_Скорость
+rReverseSpeed_mpm;Float;Yes;15;Скорость реверса, м/мин;Ram;Brakovka/08_Скорость
+rSlowdownSpeed_mpm;Float;Yes;20;Скорость замедления SLOWDOWN, м/мин;Ram;Brakovka/08_Скорость
+rMaxRampSpeed_mpm;Float;Yes;300;Предел уставки разгона, м/мин;Ram;Brakovka/08_Скорость
+rTargetLength_m;Float;Yes;500;Целевая длина намотки, м (0=автостоп выкл);Ram;Brakovka/08_Скорость
+rSlowdownStart_pct;Float;Yes;90;Вход в SLOWDOWN при прогрессе, %;Ram;Brakovka/08_Скорость
+rSlowdownExit_pct;Float;Yes;85;Выход из SLOWDOWN при прогрессе, %;Ram;Brakovka/08_Скорость
+rAccelTime_s;Float;Yes;15;Время разгона до уставки RUN, с;Ram;Brakovka/08_Скорость
+rDecelTime_s;Float;Yes;10;Время торможения уставки, с;Ram;Brakovka/08_Скорость
+rBrakeDelay_s;Float;Yes;3;Выдержка полного тормоза после STOPPING, с;Ram;Brakovka/08_Скорость
+iSpeedWindow_ms;Long;Yes;100;Окно расчёта скорости ΔL/Δt, мс;Ram;Brakovka/08_Скорость
+iFilterPidTau_ms;Long;Yes;80;EMA скорости для PID, мс (0=выкл);Ram;Brakovka/08_Скорость
+iFilterDispTau_ms;Long;Yes;500;EMA скорости для экрана, мс (0=копия PID);Ram;Brakovka/08_Скорость
+rMaxSpeed_mpm;Float;Yes;300;Отсечение выбросов скорости, м/мин;Ram;Brakovka/08_Скорость
+rKp;Float;Yes;1;Kp PID, Гц/(м/мин);Ram;Brakovka/09_PID
+rTi;Float;Yes;2;Ti PID, с;Ram;Brakovka/09_PID
+rMpmPerHz;Float;Yes;1;Feedforward, (м/мин)/Гц;Ram;Brakovka/09_PID
+rActiveKp;Float;Yes;1;Фактический Kp (обновляется каждый цикл);Ram;Brakovka/09_PID
+rActiveTi;Float;Yes;2;Фактический Ti;Ram;Brakovka/09_PID
+rActiveMpmPerHz;Float;Yes;1;Фактический MpmPerHz;Ram;Brakovka/09_PID
+rVfdFreq_Hz;Float;No;0;Задание частоты ПЧ, Гц → Modbus;Ram;Brakovka/10_Выходы
+xVfdRun;Boolean;No;0;Команда RUN на ПЧ;Ram;Brakovka/10_Выходы
+xVfdReverse;Boolean;No;0;Команда реверс на ПЧ;Ram;Brakovka/10_Выходы
+rBrakeValveCmd;Float;No;0;Клапан тормоза размотки 0..1 → AO/PWM;Ram;Brakovka/10_Выходы
+udiState;Long;No;0;Автомат: 0 IDLE 1 RUN 2 JOG 3 REV 4 SLOW 5 STOP;Ram;Brakovka/11_Телеметрия
+xMotionActive;Boolean;No;0;Идёт движение (RUN/JOG/REV/SLOW);Ram;Brakovka/11_Телеметрия
+xStopHold;Boolean;No;0;Режим STOPPING — полный тормоз;Ram;Brakovka/11_Телеметрия
+xAllowRollEdit;Boolean;No;0;Разрешено редактировать параметры рулона;Ram;Brakovka/11_Телеметрия
+rSpeedRaw_mpm;Float;No;0;Скорость после окна (до EMA PID), м/мин;Ram;Brakovka/11_Телеметрия
+rSpeedPid_mpm;Float;No;0;Скорость для PID / автонастройки, м/мин;Ram;Brakovka/11_Телеметрия
+rSpeedDisp_mpm;Float;No;0;Скорость для экрана (EMA), м/мин;Ram;Brakovka/11_Телеметрия
+rRampSpeed_mpm;Float;No;0;Уставка скорости после разгона, м/мин;Ram;Brakovka/11_Телеметрия
+xSpeedValid;Boolean;No;0;Скорость достоверна (окно заполнено);Ram;Brakovka/11_Телеметрия
+rWoundLength_m;Float;No;0;Намотано с последнего сброса намотки, м;Ram;Brakovka/11_Телеметрия
+rWoundProgress_pct;Float;No;0;Прогресс намотки к TargetLength, %;Ram;Brakovka/11_Телеметрия
+rUnwoundLength_m;Float;No;0;Размотано с последнего сброса рулона, м;Ram;Brakovka/11_Телеметрия
+rRemainingLength_m;Float;No;0;Остаток материала на рулоне размотки, м;Ram;Brakovka/11_Телеметрия
+rUnwindDiameter_mm;Float;No;0;Текущий диаметр рулона размотки, мм;Ram;Brakovka/11_Телеметрия
+rStartDiameter_mm;Float;No;0;Начальный диаметр полного рулона, мм;Ram;Brakovka/11_Телеметрия
+rBrakeDisplay_pct;Float;No;0;Тормоз для экрана, %;Ram;Brakovka/11_Телеметрия
+rTension_N;Float;No;0;Расчётное натяжение размотки, Н;Ram;Brakovka/11_Телеметрия
+xAutotuneActive;Boolean;No;0;Идёт автонастройка PI+FF;Ram;Brakovka/12_Автонастройка
+xAutotuneDone;Boolean;No;0;Автонастройка OK (импульс 1 скан);Ram;Brakovka/12_Автонастройка
+xAutotuneFailed;Boolean;No;0;Автонастройка FAIL (импульс 1 скан);Ram;Brakovka/12_Автонастройка
