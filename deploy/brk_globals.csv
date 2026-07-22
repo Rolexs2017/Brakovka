@@ -15,7 +15,6 @@ xVfdFault;Boolean;No;0;Авария ПЧ;Ram;Brakovka/03_Аварии
 xModbusFault;Boolean;No;0;Авария связи Modbus;Ram;Brakovka/03_Аварии
 udiEncPulseCount;Long;No;0;Счётчик импульсов энкодера (накопительный);Ram;Brakovka/04_Энкодер
 rMetersPerPulse;Float;Yes;0.01;Метров на импульс (0.01 = 1 см);Ram;Brakovka/04_Энкодер
-xEncInvert;Boolean;Yes;0;Инверсия направления энкодера;Ram;Brakovka/04_Энкодер
 xEmulatorEnable;Boolean;Yes;0;1=эмуляция (без реального VFD/энкодера);Ram;Brakovka/05_Эмуляция
 rEmuGearRatio;Float;Yes;20;Эмуляция: передаточное число редуктора;Ram;Brakovka/05_Эмуляция
 rEmuMotorRpmPerHz;Float;Yes;60;Эмуляция: rpm двигателя на 1 Гц ПЧ;Ram;Brakovka/05_Эмуляция

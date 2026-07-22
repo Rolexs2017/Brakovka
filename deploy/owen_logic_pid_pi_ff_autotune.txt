@@ -18,7 +18,7 @@
      — ФБ внутри функции запрещён;
      — имена без точки (.);
      — TaskPeriod_ms : UDINT (мс) во всех ФБ; внутри rDt_s = TaskPeriod_ms/1000;
-     — энкодер: накопительный счётчик, 1 импульс = 0.01 м (1 см), вход MetersPerPulse;
+     — энкодер: накопительный счётчик, вход MetersPerPulse (0.01 = 1 см);
      — порядок импорта: FC_LIMIT, FC_MaxR, FC_MinR, FC_Ema → FB_PI_Hz → FB_SpeedPI_FF →
        FB_AutoTune_PI_FF → FB_SpeedCalc, FB_UnwindRollDia, FB_BrakeForce → FB_MachineCtrl
        → FB_BrakovkaEmu → FB_Brakovka (один ФБ на холсте);
@@ -136,7 +136,7 @@ FUNCTION_BLOCK FB_SpeedCalc
         Enable            : BOOL;
         /// Сброс накопителей и фильтров
         Reset             : BOOL;
-        /// Текущий счётчик импульсов (накопительный, 1 имп = 1 см по умолчанию)
+        /// Текущий счётчик импульсов (накопительный)
         PulseCount        : UDINT;
         /// Метров на один импульс (0.01 = 1 см)
         MetersPerPulse    : REAL := 0.01;
@@ -148,8 +148,6 @@ FUNCTION_BLOCK FB_SpeedCalc
         FilterPidTau_ms   : UDINT := 80;
         /// EMA для визуализации, мс (0 = копия PID)
         FilterDispTau_ms  : UDINT := 500;
-        /// Инверсия направления
-        Invert            : BOOL;
         /// Предельная скорость для отсечения выбросов, м/мин
         MaxSpeed_mpm      : REAL := 300.0;
     END_VAR
@@ -240,11 +238,7 @@ FUNCTION_BLOCK FB_SpeedCalc
     udiPrevPulse := PulseCount;
 
     rDeltaLen_m := UDINT_TO_REAL(udiPulseDelta) * rMetersPerPulse;
-    IF Invert THEN
-        WoundLength_m := FC_MaxR(0.0, WoundLength_m - rDeltaLen_m);
-    ELSE
-        WoundLength_m := WoundLength_m + rDeltaLen_m;
-    END_IF
+    WoundLength_m := WoundLength_m + rDeltaLen_m;
 
     udiWinPulseAcc := udiWinPulseAcc + udiPulseDelta;
     udiWinElapsed_ms := udiWinElapsed_ms + TaskPeriod_ms;
@@ -1454,7 +1448,6 @@ FUNCTION_BLOCK FB_Brakovka
         EmuSpeedTau_s        : REAL := 0.15;
         (* --- линейный счётчик энкодера --- *)
         MetersPerPulse       : REAL := 0.01;
-        EncoderInvert        : BOOL;
         (* --- рулон размотки --- *)
         MaterialThickness_mm : REAL := 0.05;
         RollLength_m         : UDINT := 500;
@@ -1640,7 +1633,6 @@ FUNCTION_BLOCK FB_Brakovka
     fbSpeed.SpeedWindow_ms   := SpeedWindow_ms;
     fbSpeed.FilterPidTau_ms  := FilterPidTau_ms;
     fbSpeed.FilterDispTau_ms := FilterDispTau_ms;
-    fbSpeed.Invert           := EncoderInvert;
     fbSpeed.MaxSpeed_mpm     := MaxSpeed_mpm;
     fbSpeed();
     xApplyWoundReset := FALSE;
@@ -1768,7 +1760,7 @@ END_FUNCTION_BLOCK
 //   fbPlant.TaskPeriod_ms   := iTaskPeriod_ms
 //   fbPlant.EmulatorEnable  := xEmulatorEnable
 //   fbPlant.PulseCount      := udiEncPulseCount
-//   fbPlant.MetersPerPulse  := rMetersPerPulse
+//   fbPlant.MetersPerPulse  := rMetersPerPulse   (* 0.01 = 1 см *)
 //   ... команды, уставки, аварии — см. brk_globals.csv
 //
 //   rVfdFreq_Hz     := fbPlant.VfdFreq_Hz
