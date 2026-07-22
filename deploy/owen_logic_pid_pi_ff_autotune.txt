@@ -1,7 +1,10 @@
 (* ============================================================================
    Brakovka — PI + Feedforward с автонастройкой для Owen Logic (ST)
+   Rev 1.2.0 — 2026-07-22
+   FB_Brakovka ~21 вх + ~16 вых. FOPDT без ARRAY. Gains = INPUT + MOVE.
 
    Порт: brakovka_pi/pid_tune.py (pi_ff), pid.py, machine.py
+   Проводка FBD: deploy/owen_wiring.md , globals: deploy/brk_globals.csv
 
    Как импортировать:
      Менеджер компонентов → создать Function / Function Block ST → вставить код
@@ -12,21 +15,22 @@
    Ограничения Owen Logic ST:
      — нет встроенного LIMIT → FC_LIMIT;
      — MAX/MIN для REAL → FC_MaxR / FC_MinR (SYS.MAX — только UDINT!);
-     — нет пользовательских TYPE/ENUM → Phase : UDINT;
+     — нет пользовательских TYPE/ENUM → Phase / FailCode : UDINT;
      — вызов функций только позиционно: FC_LIMIT(a, b, c), без «In :=»;
      — FOPDT встроен в FB_AutoTune (нельзя fopdtRes := FC_...());
      — ФБ внутри функции запрещён;
      — имена без точки (.);
-     — TaskPeriod_ms : UDINT (мс) во всех ФБ; внутри rDt_s = TaskPeriod_ms/1000;
+     — TaskPeriod_ms : UDINT (мс); внутри rDt_s = TaskPeriod_ms/1000;
      — энкодер: накопительный счётчик, вход MetersPerPulse (0.01 = 1 см);
      — порядок импорта: FC_LIMIT, FC_MaxR, FC_MinR, FC_Ema → FB_PI_Hz → FB_SpeedPI_FF →
        FB_AutoTune_PI_FF → FB_SpeedCalc, FB_UnwindRollDia, FB_BrakeForce → FB_MachineCtrl
        → FB_BrakovkaEmu → FB_Brakovka (один ФБ на холсте);
 
    Рабочий режим:
-     freq_hz = setpoint_mpm / mpm_per_hz + PI(error), Kd = 0
+     freq_hz = setpoint_mpm / mpm_per_hz + PI(error), |PI| <= PiCorrMax_Hz, Kd = 0
 
    Автонастройка: baseline 0 Гц → step → FOPDT → mpm_per_hz + Kp/Ti
+     FailCode: 0 OK, 1 timeout, 2 мало сэмплов, 3 step мал, 4 dy мал, 5 abort, 6 FOPDT fail
    ============================================================================ *)
 
 
@@ -227,7 +231,7 @@ FUNCTION_BLOCK FB_SpeedCalc
         udiPulseDelta := PulseCount;
     END_IF
 
-    udiMaxPulseStep := REAL_TO_UDINT((rOverspeed_mpm / 60.0) * rDt_s / rMetersPerPulse + 1.0);
+    udiMaxPulseStep := REAL_TO_UDINT(FC_MaxR(0.0, (rOverspeed_mpm / 60.0) * rDt_s / rMetersPerPulse) + 1.0);
     IF udiMaxPulseStep < 1 THEN
         udiMaxPulseStep := 1;
     END_IF
@@ -516,8 +520,10 @@ FUNCTION_BLOCK FB_PI_Hz
 
     VAR
         Integral           : REAL;
-        rP, rI             : REAL;
-        rOutUnsat, rOutSat : REAL;
+        rP                 : REAL;
+        rI                 : REAL;
+        rOutUnsat          : REAL;
+        rOutSat            : REAL;
         rDt_s              : REAL;
     END_VAR
 
@@ -573,6 +579,8 @@ FUNCTION_BLOCK FB_SpeedPI_FF
         TaskPeriod_ms : UDINT := 10;
         OutMinHz     : REAL := 0.0;
         OutMaxHz     : REAL := 320.0;
+        /// Лимит |коррекции PI|, Гц (feedforward отдельно)
+        PiCorrMax_Hz : REAL := 20.0;
     END_VAR
 
     VAR_OUTPUT
@@ -580,7 +588,9 @@ FUNCTION_BLOCK FB_SpeedPI_FF
     END_VAR
 
     VAR
-        fbPI : FB_PI_Hz;
+        fbPI       : FB_PI_Hz;
+        rCorrMax   : REAL;
+        rFf_Hz     : REAL;
     END_VAR
 
     IF NOT Enable OR Setpoint_mpm <= 0.01 THEN
@@ -591,16 +601,19 @@ FUNCTION_BLOCK FB_SpeedPI_FF
         RETURN;
     END_IF
 
-    fbPI.Enable       := TRUE;
-    fbPI.Reset        := FALSE;
-    fbPI.Kp           := Kp;
-    fbPI.Ti           := Ti;
-    fbPI.Error_mpm    := Setpoint_mpm - Actual_mpm;
+    rCorrMax := FC_MaxR(0.1, PiCorrMax_Hz);
+    rFf_Hz   := Setpoint_mpm / FC_MaxR(0.01, MpmPerHz);
+
+    fbPI.Enable        := TRUE;
+    fbPI.Reset         := FALSE;
+    fbPI.Kp            := Kp;
+    fbPI.Ti            := Ti;
+    fbPI.Error_mpm     := Setpoint_mpm - Actual_mpm;
     fbPI.TaskPeriod_ms := TaskPeriod_ms;
-    fbPI.OutMin       := OutMinHz;
-    fbPI.OutMax       := OutMaxHz;
+    fbPI.OutMin        := rCorrMax * (-1.0);
+    fbPI.OutMax        := rCorrMax;
     fbPI();
-    FreqCmd_Hz := FC_LIMIT(OutMinHz, Setpoint_mpm / FC_MaxR(0.01, MpmPerHz) + fbPI.OutHz, OutMaxHz);
+    FreqCmd_Hz := FC_LIMIT(OutMinHz, rFf_Hz + fbPI.OutHz, OutMaxHz);
 
 END_FUNCTION_BLOCK
 
@@ -608,7 +621,8 @@ END_FUNCTION_BLOCK
 // ============================================================================
 // FB_AutoTune_PI_FF — автонастройка PI+FF (open-loop step)
 // Phase: 0=IDLE 1=BASELINE 2=STEP 3=ANALYZE 4=DONE 5=FAILED 6=ABORTED
-// FOPDT + расчёт Kp/Ti встроены (Owen Logic не поддержает fopdtRes := FC_...())
+// FailCode: 0=OK 1=timeout 2=samples 3=step 4=dy 5=abort 6=fopdt
+// БЕЗ массива SpeedBuf / FOR — онлайн FOPDT (иначе watchdog → перезагрузка ПР)
 // ============================================================================
 
 /// Автонастройка PI+FF по ступеньке частоты
@@ -627,7 +641,6 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
         Baseline_s     : REAL := 2.0;
         StepDuration_s : REAL := 10.0;
         Timeout_s      : REAL := 40.0;
-        MaxSamples     : UDINT := 500;
     END_VAR
 
     VAR_OUTPUT
@@ -635,6 +648,8 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
         Done            : BOOL;
         Failed          : BOOL;
         Phase           : UDINT;
+        /// 0 OK, 1 timeout, 2 samples, 3 step, 4 dy, 5 abort, 6 fopdt
+        FailCode        : UDINT;
         FreqCmd_Hz      : REAL;
         RunVFD          : BOOL;
         Result_Kp       : REAL;
@@ -643,41 +658,38 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
     END_VAR
 
     VAR
-        udiPhase_ms     : UDINT;
-        udiTotal_ms     : UDINT;
-        udiBaseline_ms  : UDINT;
-        udiStep_ms      : UDINT;
-        udiTimeout_ms   : UDINT;
-        udiTail_ms      : UDINT;
-        rDt_s           : REAL;
-        sampleIdx       : UDINT;
-        SpeedBuf        : ARRAY[0..499] OF REAL;
-        baselineTicks   : UDINT;
-        tailTicks       : UDINT;
-        xAnalyzeStarted : BOOL;
-        xStartPrev      : BOOL;
-        xStartRise      : BOOL;
-        (* FOPDT, локально *)
-        iFopdt          : UDINT;
-        iStepFopdt      : UDINT;
-        lTicksFopdt     : UDINT;
-        y0Fopdt         : REAL;
-        yInfFopdt       : REAL;
-        dyFopdt         : REAL;
-        kProcFopdt      : REAL;
-        tProcFopdt      : REAL;
-        lProcFopdt      : REAL;
-        threshLoFopdt   : REAL;
-        targetFopdt     : REAL;
-        sumBaseFopdt    : REAL;
-        sumTailFopdt    : REAL;
-        stepHzAbsFopdt  : REAL;
-        xFoundTFopdt    : BOOL;
-        xFopdtOk        : BOOL;
-        xTimingsReady   : BOOL;
+        udiPhase_ms       : UDINT;
+        udiTotal_ms       : UDINT;
+        udiBaseline_ms    : UDINT;
+        udiStep_ms        : UDINT;
+        udiTimeout_ms     : UDINT;
+        udiTail_ms        : UDINT;
+        udiSampleEvery_ms : UDINT;
+        udiSampleAcc_ms   : UDINT;
+        rDt_s             : REAL;
+        xStartPrev        : BOOL;
+        xStartRise        : BOOL;
+        xTimingsReady     : BOOL;
+        (* онлайн-статистика *)
+        udiBaseCnt        : UDINT;
+        udiTailCnt        : UDINT;
+        udiStepCnt        : UDINT;
+        sumBase           : REAL;
+        sumTail           : REAL;
+        y0                : REAL;
+        yInf              : REAL;
+        dy                : REAL;
+        kProc             : REAL;
+        tProc             : REAL;
+        lProc             : REAL;
+        threshLo          : REAL;
+        target63          : REAL;
+        stepAbs           : REAL;
+        rStepElapsed_s    : REAL;
+        xFoundL           : BOOL;
+        xFoundT           : BOOL;
+        xSamplePulse      : BOOL;
     END_VAR
-
-    (* Phase: 0 IDLE, 1 BASELINE, 2 STEP, 3 ANALYZE, 4 DONE, 5 FAILED, 6 ABORTED *)
 
     xStartRise := Start AND NOT xStartPrev;
     xStartPrev := Start;
@@ -687,10 +699,11 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
         Busy := FALSE;
         Done := FALSE;
         Failed := FALSE;
+        FailCode := 0;
         FreqCmd_Hz := 0.0;
         RunVFD := FALSE;
-        xAnalyzeStarted := FALSE;
-        xTimingsReady   := FALSE;
+        xTimingsReady := FALSE;
+        udiSampleAcc_ms := 0;
         RETURN;
     END_IF
 
@@ -698,7 +711,8 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
         Phase := 6;
         Busy := FALSE;
         Done := FALSE;
-        Failed := FALSE;
+        Failed := TRUE;
+        FailCode := 5;
         FreqCmd_Hz := 0.0;
         RunVFD := FALSE;
         RETURN;
@@ -708,11 +722,22 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
         Phase := 1;
         udiPhase_ms := 0;
         udiTotal_ms := 0;
-        sampleIdx := 0;
-        xAnalyzeStarted := FALSE;
-        xTimingsReady   := FALSE;
+        udiSampleAcc_ms := 0;
+        udiBaseCnt := 0;
+        udiTailCnt := 0;
+        udiStepCnt := 0;
+        sumBase := 0.0;
+        sumTail := 0.0;
+        y0 := 0.0;
+        yInf := 0.0;
+        lProc := 0.05;
+        tProc := 0.1;
+        xFoundL := FALSE;
+        xFoundT := FALSE;
+        xTimingsReady := FALSE;
         Done := FALSE;
         Failed := FALSE;
+        FailCode := 0;
         Busy := TRUE;
     END_IF
 
@@ -728,13 +753,21 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
     END_IF
 
     rDt_s := UDINT_TO_REAL(TaskPeriod_ms) / 1000.0;
+
     IF NOT xTimingsReady THEN
-        udiBaseline_ms := REAL_TO_UDINT(Baseline_s * 1000.0);
-        udiStep_ms     := REAL_TO_UDINT(StepDuration_s * 1000.0);
-        udiTimeout_ms  := REAL_TO_UDINT(Timeout_s * 1000.0);
+        udiBaseline_ms := REAL_TO_UDINT(FC_MaxR(0.0, Baseline_s) * 1000.0);
+        udiStep_ms     := REAL_TO_UDINT(FC_MaxR(0.0, StepDuration_s) * 1000.0);
+        udiTimeout_ms  := REAL_TO_UDINT(FC_MaxR(1.0, Timeout_s) * 1000.0);
         udiTail_ms     := 300;
+        udiSampleEvery_ms := 20;
+        IF udiSampleEvery_ms < TaskPeriod_ms THEN
+            udiSampleEvery_ms := TaskPeriod_ms;
+        END_IF
         IF udiBaseline_ms < TaskPeriod_ms THEN
             udiBaseline_ms := TaskPeriod_ms;
+        END_IF
+        IF udiStep_ms < TaskPeriod_ms THEN
+            udiStep_ms := TaskPeriod_ms;
         END_IF
         xTimingsReady := TRUE;
     END_IF
@@ -745,35 +778,81 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
     IF udiTotal_ms > udiTimeout_ms THEN
         Phase := 5;
         Failed := TRUE;
+        FailCode := 1;
         Busy := FALSE;
         FreqCmd_Hz := 0.0;
         RunVFD := FALSE;
         RETURN;
     END_IF
 
-    IF sampleIdx < MaxSamples THEN
-        SpeedBuf[sampleIdx] := Actual_mpm;
-        sampleIdx := sampleIdx + 1;
-    END_IF
-
-    baselineTicks := udiBaseline_ms / TaskPeriod_ms;
-    tailTicks := udiTail_ms / TaskPeriod_ms;
-    IF tailTicks < 1 THEN
-        tailTicks := 1;
+    xSamplePulse := FALSE;
+    udiSampleAcc_ms := udiSampleAcc_ms + TaskPeriod_ms;
+    IF udiSampleAcc_ms >= udiSampleEvery_ms THEN
+        udiSampleAcc_ms := udiSampleAcc_ms - udiSampleEvery_ms;
+        xSamplePulse := TRUE;
     END_IF
 
     CASE Phase OF
         1:
             FreqCmd_Hz := 0.0;
             RunVFD := TRUE;
+            IF xSamplePulse THEN
+                sumBase := sumBase + Actual_mpm;
+                udiBaseCnt := udiBaseCnt + 1;
+            END_IF
             IF udiPhase_ms >= udiBaseline_ms THEN
-                Phase := 2;
-                udiPhase_ms := 0;
+                IF udiBaseCnt < 3 THEN
+                    Phase := 5;
+                    Failed := TRUE;
+                    FailCode := 2;
+                    Busy := FALSE;
+                    FreqCmd_Hz := 0.0;
+                    RunVFD := FALSE;
+                ELSE
+                    y0 := sumBase / UDINT_TO_REAL(udiBaseCnt);
+                    Phase := 2;
+                    udiPhase_ms := 0;
+                    xFoundL := FALSE;
+                    xFoundT := FALSE;
+                    lProc := 0.05;
+                    tProc := 0.1;
+                END_IF
             END_IF
 
         2:
             FreqCmd_Hz := FC_LIMIT(0.0, Step_Hz, 320.0);
             RunVFD := TRUE;
+            rStepElapsed_s := UDINT_TO_REAL(udiPhase_ms) / 1000.0;
+
+            IF xSamplePulse THEN
+                udiStepCnt := udiStepCnt + 1;
+                (* хвост для yInf *)
+                IF udiPhase_ms + udiSampleEvery_ms >= udiStep_ms - udiTail_ms THEN
+                    sumTail := sumTail + Actual_mpm;
+                    udiTailCnt := udiTailCnt + 1;
+                END_IF
+                (* оценка порогов по текущему отклику *)
+                dy := Actual_mpm - y0;
+                IF ABS(dy) >= 0.05 THEN
+                    threshLo := y0 + 0.1 * dy;
+                    target63 := y0 + 0.632 * dy;
+                    IF NOT xFoundL THEN
+                        IF (dy > 0.0 AND Actual_mpm >= threshLo) OR
+                           (dy < 0.0 AND Actual_mpm <= threshLo) THEN
+                            lProc := FC_MaxR(0.0, rStepElapsed_s);
+                            xFoundL := TRUE;
+                        END_IF
+                    END_IF
+                    IF xFoundL AND NOT xFoundT THEN
+                        IF (dy > 0.0 AND Actual_mpm >= target63) OR
+                           (dy < 0.0 AND Actual_mpm <= target63) THEN
+                            tProc := FC_MaxR(0.05, rStepElapsed_s - lProc);
+                            xFoundT := TRUE;
+                        END_IF
+                    END_IF
+                END_IF
+            END_IF
+
             IF udiPhase_ms >= udiStep_ms THEN
                 Phase := 3;
             END_IF
@@ -781,81 +860,51 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
         3:
             FreqCmd_Hz := 0.0;
             RunVFD := FALSE;
-            IF NOT xAnalyzeStarted THEN
-                xAnalyzeStarted := TRUE;
-                xFopdtOk := FALSE;
-                kProcFopdt := 0.0;
-                tProcFopdt := 0.0;
-                lProcFopdt := 0.0;
+            FailCode := 6;
 
-                IF sampleIdx >= (baselineTicks + tailTicks + 5) THEN
-                    stepHzAbsFopdt := ABS(Step_Hz);
-                    IF stepHzAbsFopdt >= 0.1 THEN
-                        sumBaseFopdt := 0.0;
-                        FOR iFopdt := 0 TO baselineTicks - 1 DO
-                            sumBaseFopdt := sumBaseFopdt + SpeedBuf[iFopdt];
-                        END_FOR
-                        y0Fopdt := sumBaseFopdt / UDINT_TO_REAL(baselineTicks);
-
-                        IF sampleIdx > tailTicks THEN
-                            sumTailFopdt := 0.0;
-                            FOR iFopdt := sampleIdx - tailTicks TO sampleIdx - 1 DO
-                                sumTailFopdt := sumTailFopdt + SpeedBuf[iFopdt];
-                            END_FOR
-                            yInfFopdt := sumTailFopdt / UDINT_TO_REAL(tailTicks);
-
-                            dyFopdt := yInfFopdt - y0Fopdt;
-                            IF ABS(dyFopdt) >= 0.05 THEN
-                                kProcFopdt := dyFopdt / stepHzAbsFopdt;
-
-                                threshLoFopdt := y0Fopdt + 0.1 * ABS(dyFopdt);
-                                lProcFopdt := 0.05;
-                                FOR iFopdt := baselineTicks TO sampleIdx - 1 DO
-                                    IF (dyFopdt > 0.0 AND SpeedBuf[iFopdt] >= threshLoFopdt) OR
-                                       (dyFopdt < 0.0 AND SpeedBuf[iFopdt] <= threshLoFopdt) THEN
-                                        lProcFopdt := FC_MaxR(0.0, UDINT_TO_REAL(iFopdt - baselineTicks) * rDt_s);
-                                        EXIT;
-                                    END_IF
-                                END_FOR
-
-                                iStepFopdt := baselineTicks;
-                                lTicksFopdt := REAL_TO_UDINT(lProcFopdt / rDt_s);
-                                targetFopdt := y0Fopdt + 0.632 * dyFopdt;
-                                xFoundTFopdt := FALSE;
-                                tProcFopdt := 0.1;
-
-                                FOR iFopdt := baselineTicks TO sampleIdx - 1 DO
-                                    IF iFopdt > iStepFopdt + lTicksFopdt THEN
-                                        IF (dyFopdt > 0.0 AND SpeedBuf[iFopdt] >= targetFopdt) OR
-                                           (dyFopdt < 0.0 AND SpeedBuf[iFopdt] <= targetFopdt) THEN
-                                            tProcFopdt := FC_MaxR(0.05, UDINT_TO_REAL(iFopdt - iStepFopdt) * rDt_s - lProcFopdt);
-                                            xFoundTFopdt := TRUE;
-                                            EXIT;
-                                        END_IF
-                                    END_IF
-                                END_FOR
-
-                                IF NOT xFoundTFopdt THEN
-                                    tProcFopdt := FC_MaxR(0.1, (UDINT_TO_REAL(sampleIdx - 1 - iStepFopdt) * rDt_s - lProcFopdt) * 0.5);
-                                END_IF
-
-                                xFopdtOk := TRUE;
-                            END_IF
-                        END_IF
-                    END_IF
-                END_IF
-
-                IF xFopdtOk AND kProcFopdt > 1.0E-4 THEN
-                    Result_Kp       := 0.25 / FC_MaxR(0.01, ABS(kProcFopdt));
-                    Result_Ti       := FC_MaxR(1.0, 2.0 * FC_MaxR(0.1, tProcFopdt));
-                    Result_MpmPerHz := FC_MaxR(0.01, ABS(kProcFopdt));
-                    Phase := 4;
-                    Done := TRUE;
-                    Busy := FALSE;
-                ELSE
+            stepAbs := ABS(Step_Hz);
+            IF udiStepCnt < 5 THEN
+                FailCode := 2;
+                Phase := 5;
+                Failed := TRUE;
+                Busy := FALSE;
+            ELSIF stepAbs < 0.1 THEN
+                FailCode := 3;
+                Phase := 5;
+                Failed := TRUE;
+                Busy := FALSE;
+            ELSIF udiTailCnt < 1 THEN
+                FailCode := 2;
+                Phase := 5;
+                Failed := TRUE;
+                Busy := FALSE;
+            ELSE
+                yInf := sumTail / UDINT_TO_REAL(udiTailCnt);
+                dy := yInf - y0;
+                IF ABS(dy) < 0.05 THEN
+                    FailCode := 4;
                     Phase := 5;
                     Failed := TRUE;
                     Busy := FALSE;
+                ELSE
+                    kProc := dy / stepAbs;
+                    IF NOT xFoundT THEN
+                        tProc := FC_MaxR(0.1, (UDINT_TO_REAL(udiStep_ms) / 1000.0 - lProc) * 0.5);
+                    END_IF
+                    IF kProc > 1.0E-4 THEN
+                        Result_Kp       := 0.25 / FC_MaxR(0.01, ABS(kProc));
+                        Result_Ti       := FC_MaxR(1.0, 2.0 * FC_MaxR(0.1, tProc));
+                        Result_MpmPerHz := FC_MaxR(0.01, ABS(kProc));
+                        FailCode := 0;
+                        Phase := 4;
+                        Done := TRUE;
+                        Busy := FALSE;
+                    ELSE
+                        FailCode := 6;
+                        Phase := 5;
+                        Failed := TRUE;
+                        Busy := FALSE;
+                    END_IF
                 END_IF
             END_IF
 
@@ -864,7 +913,12 @@ FUNCTION_BLOCK FB_AutoTune_PI_FF
             FreqCmd_Hz := 0.0;
             RunVFD := FALSE;
 
-        5, 6:
+        5:
+            Busy := FALSE;
+            FreqCmd_Hz := 0.0;
+            RunVFD := FALSE;
+
+        6:
             Busy := FALSE;
             FreqCmd_Hz := 0.0;
             RunVFD := FALSE;
@@ -886,81 +940,60 @@ FUNCTION_BLOCK FB_MachineCtrl
 
     VAR_INPUT
         Enable               : BOOL;
-        /// Период задачи, мс
         TaskPeriod_ms        : UDINT := 10;
-        /// Импульс Пуск
         CmdStart             : BOOL;
-        /// Импульс Стоп
         CmdStop              : BOOL;
-        /// Уровень Толчок
         CmdJog               : BOOL;
-        /// Уровень Реверс
         CmdReverse           : BOOL;
-        /// Цепь E-STOP замкнута
         EstopOk              : BOOL;
-        /// Сброс рулона (импульс)
         CmdResetRoll         : BOOL;
-        /// Сброс намотки (импульс)
         CmdResetWound        : BOOL;
-        /// Запуск автонастройки PI+FF (импульс)
         CmdAutotune          : BOOL;
-        /// Фактическая скорость для PID, м/мин (FB_SpeedCalc.SpeedPid_mpm)
         ActualSpeed_mpm      : REAL;
-        /// Намотано, м
         WoundLength_m        : REAL;
-        /// Аварии
         VfdFault             : BOOL;
         ModbusFault          : BOOL;
         EncoderFault         : BOOL;
-        /// Уставки скорости, м/мин
         SpeedSetpoint_mpm    : REAL := 100.0;
         JogSpeed_mpm         : REAL := 10.0;
         ReverseSpeed_mpm     : REAL := 15.0;
         SlowdownSpeed_mpm    : REAL := 20.0;
         MaxRampSpeed_mpm     : REAL := 300.0;
-        /// Целевая длина намотки, м (0 = без автостопа)
         TargetLength_m       : REAL := 500.0;
         SlowdownStart_pct    : REAL := 90.0;
         SlowdownExit_pct     : REAL := 85.0;
         AccelTime_s          : REAL := 15.0;
         DecelTime_s          : REAL := 10.0;
-        /// Выдержка тормоза после стопа, с
         BrakeDelay_s         : REAL := 3.0;
-        /// PID / feedforward
+        PiCorrMax_Hz         : REAL := 20.0;
+        AutotuneStep_Hz      : REAL := 12.0;
+        AutotuneBaseline_s   : REAL := 2.0;
+        AutotuneStepDur_s    : REAL := 10.0;
+        AutotuneTimeout_s    : REAL := 40.0;
+        /// PID / feedforward (с HMI / Retain); после autotune → Active* + MOVE на FBD
         Kp                   : REAL := 1.0;
         Ti                   : REAL := 2.0;
         MpmPerHz             : REAL := 1.0;
     END_VAR
 
     VAR_OUTPUT
-        /// 0 IDLE .. 5 STOPPING
         State                : UDINT;
-        /// Уставка после разгона, м/мин
         RampSpeed_mpm        : REAL;
-        /// Задание частоты ПЧ, Гц
         VfdFreq_Hz           : REAL;
-        /// Команда RUN на ПЧ
         VfdRun               : BOOL;
-        /// Реверс ПЧ
         VfdReverse           : BOOL;
-        /// Полный тормоз (STOPPING) → FB_BrakeForce.StopHold
         StopHold             : BOOL;
-        /// Натяжение активно → FB_BrakeForce.ControlActive
         TensionActive        : BOOL;
-        /// Идёт движение
         MotionActive         : BOOL;
-        /// Можно менять параметры рулона
         AllowRollEdit        : BOOL;
-        /// Односкановые импульсы сброса
         ResetRollPulse       : BOOL;
         ResetWoundPulse      : BOOL;
-        /// Прогресс намотки, %%
         WoundProgress_pct    : REAL;
-        /// Автонастройка
         AutotuneActive       : BOOL;
         AutotuneDone         : BOOL;
         AutotuneFailed       : BOOL;
-        /// Актуальные Kp/Ti/MpmPerHz (обновляются после автонастройки)
+        AutotunePhase        : UDINT;
+        AutotuneFailCode     : UDINT;
         ActiveKp             : REAL;
         ActiveTi             : REAL;
         ActiveMpmPerHz       : REAL;
@@ -998,6 +1031,9 @@ FUNCTION_BLOCK FB_MachineCtrl
         rActiveKp            : REAL;
         rActiveTi            : REAL;
         rActiveMpmPerHz      : REAL;
+        rKpPrev              : REAL;
+        rTiPrev              : REAL;
+        rMpmPrev             : REAL;
         xGainPrimed          : BOOL;
     END_VAR
 
@@ -1017,6 +1053,8 @@ FUNCTION_BLOCK FB_MachineCtrl
         MotionActive  := FALSE;
         AllowRollEdit := TRUE;
         AutotuneActive := FALSE;
+        AutotunePhase := 0;
+        AutotuneFailCode := 0;
         xAutotune     := FALSE;
         xTuneStartReq := FALSE;
         xTuneResetReq := TRUE;
@@ -1034,8 +1072,9 @@ FUNCTION_BLOCK FB_MachineCtrl
     END_IF
 
     rDt_s := UDINT_TO_REAL(TaskPeriod_ms) / 1000.0;
-    udiBrakeDelay_ms := REAL_TO_UDINT(BrakeDelay_s * 1000.0);
+    udiBrakeDelay_ms := REAL_TO_UDINT(FC_MaxR(0.0, BrakeDelay_s) * 1000.0);
 
+    (* Команды: только фронт 0→1; удержание уровня повторно не срабатывает *)
     xStartRise     := CmdStart AND NOT xStartPrev;
     xStopRise      := CmdStop AND NOT xStopPrev;
     xResetRollRise := CmdResetRoll AND NOT xResetRollPrev;
@@ -1065,13 +1104,30 @@ FUNCTION_BLOCK FB_MachineCtrl
         rActiveKp       := Kp;
         rActiveTi       := Ti;
         rActiveMpmPerHz := MpmPerHz;
+        rKpPrev         := Kp;
+        rTiPrev         := Ti;
+        rMpmPrev        := MpmPerHz;
         xGainPrimed     := TRUE;
+    ELSIF NOT xAutotune THEN
+        (* Ручная правка gains с HMI → принять *)
+        IF ABS(Kp - rKpPrev) > 0.000001 THEN
+            rActiveKp := Kp;
+        END_IF
+        IF ABS(Ti - rTiPrev) > 0.000001 THEN
+            rActiveTi := Ti;
+        END_IF
+        IF ABS(MpmPerHz - rMpmPrev) > 0.000001 THEN
+            rActiveMpmPerHz := MpmPerHz;
+        END_IF
     END_IF
+    rKpPrev  := Kp;
+    rTiPrev  := Ti;
+    rMpmPrev := MpmPerHz;
+
     ActiveKp       := rActiveKp;
     ActiveTi       := rActiveTi;
     ActiveMpmPerHz := rActiveMpmPerHz;
 
-    (* --- сброс рулона / намотки (только IDLE) --- *)
     IF (State = 0) AND NOT xAutotune THEN
         IF xResetRollRise THEN
             ResetRollPulse := TRUE;
@@ -1081,7 +1137,6 @@ FUNCTION_BLOCK FB_MachineCtrl
         END_IF
     END_IF
 
-    (* --- старт автонастройки --- *)
     IF xAutotuneRise AND (State = 0) AND NOT xAutotune AND EstopOk AND NOT xFault THEN
         xAutotune     := TRUE;
         xTuneStartReq := TRUE;
@@ -1091,7 +1146,6 @@ FUNCTION_BLOCK FB_MachineCtrl
 
     AutotuneActive := xAutotune;
 
-    (* --- автомат состояний --- *)
     IF xAutotune THEN
         IF xStopAll THEN
             xAutotune     := FALSE;
@@ -1133,14 +1187,15 @@ FUNCTION_BLOCK FB_MachineCtrl
                 END_IF
 
             2:
-                IF NOT CmdJog OR xFault THEN
+                (* как Python + E-STOP/Стоп → STOPPING *)
+                IF NOT CmdJog OR xFault OR NOT EstopOk OR xStopRise THEN
                     State := 5;
                     udiBrakeHold_ms := 0;
                     rRamp := 0.0;
                 END_IF
 
             3:
-                IF NOT CmdReverse OR xFault THEN
+                IF NOT CmdReverse OR xFault OR NOT EstopOk OR xStopRise THEN
                     State := 5;
                     udiBrakeHold_ms := 0;
                     rRamp := 0.0;
@@ -1158,12 +1213,10 @@ FUNCTION_BLOCK FB_MachineCtrl
 
     MotionActive  := (State = 1) OR (State = 2) OR (State = 3) OR (State = 4);
     StopHold      := State = 5;
-    (* REVERSE без натяжения — как machine.py tension_control_enabled *)
     TensionActive := ((State = 1) OR (State = 2) OR (State = 4)) AND NOT xAutotune;
     AllowRollEdit := (State = 0) AND NOT xAutotune;
     VfdReverse    := (State = 3) AND NOT xAutotune;
 
-    (* --- разгон / торможение уставки --- *)
     IF xAutotune OR (State = 0) OR (State = 5) THEN
         rRamp := 0.0;
     ELSE
@@ -1200,16 +1253,22 @@ FUNCTION_BLOCK FB_MachineCtrl
     END_IF
     RampSpeed_mpm := rRamp;
 
-    (* --- автонастройка PI+FF --- *)
-    fbTune.ResetState := xTuneResetReq;
-    fbTune.Start      := xTuneStartReq;
-    fbTune.Abort      := xStopAll;
-    fbTune.Actual_mpm := ActualSpeed_mpm;
-    fbTune.TaskPeriod_ms := TaskPeriod_ms;
+    fbTune.ResetState      := xTuneResetReq;
+    fbTune.Start           := xTuneStartReq;
+    fbTune.Abort           := xStopAll;
+    fbTune.Actual_mpm      := ActualSpeed_mpm;
+    fbTune.TaskPeriod_ms   := TaskPeriod_ms;
+    fbTune.Step_Hz         := AutotuneStep_Hz;
+    fbTune.Baseline_s      := AutotuneBaseline_s;
+    fbTune.StepDuration_s  := AutotuneStepDur_s;
+    fbTune.Timeout_s       := AutotuneTimeout_s;
     fbTune();
     IF xTuneResetReq THEN
         xTuneResetReq := FALSE;
     END_IF
+
+    AutotunePhase    := fbTune.Phase;
+    AutotuneFailCode := fbTune.FailCode;
 
     IF xAutotune THEN
         IF fbTune.Busy OR fbTune.Done OR fbTune.Failed THEN
@@ -1221,6 +1280,10 @@ FUNCTION_BLOCK FB_MachineCtrl
             rActiveKp       := fbTune.Result_Kp;
             rActiveTi       := fbTune.Result_Ti;
             rActiveMpmPerHz := fbTune.Result_MpmPerHz;
+            (* Retain: на FBD MOVE ActiveKp→rKp, ActiveTi→rTi, ActiveMpmPerHz→rMpmPerHz *)
+            ActiveKp       := rActiveKp;
+            ActiveTi       := rActiveTi;
+            ActiveMpmPerHz := rActiveMpmPerHz;
             AutotuneDone   := TRUE;
             xAutotune      := FALSE;
             State          := 5;
@@ -1237,13 +1300,14 @@ FUNCTION_BLOCK FB_MachineCtrl
             xTuneResetReq  := TRUE;
         END_IF
     ELSE
-        fbReg.Enable       := MotionActive AND (rRamp > 0.01);
-        fbReg.Setpoint_mpm := rRamp;
-        fbReg.Actual_mpm   := ActualSpeed_mpm;
-        fbReg.MpmPerHz     := ActiveMpmPerHz;
-        fbReg.Kp           := ActiveKp;
-        fbReg.Ti           := ActiveTi;
+        fbReg.Enable        := MotionActive AND (rRamp > 0.01);
+        fbReg.Setpoint_mpm  := rRamp;
+        fbReg.Actual_mpm    := ActualSpeed_mpm;
+        fbReg.MpmPerHz      := rActiveMpmPerHz;
+        fbReg.Kp            := rActiveKp;
+        fbReg.Ti            := rActiveTi;
         fbReg.TaskPeriod_ms := TaskPeriod_ms;
+        fbReg.PiCorrMax_Hz  := PiCorrMax_Hz;
         fbReg();
 
         IF StopHold OR (rRamp <= 0.01) OR NOT EstopOk THEN
@@ -1380,7 +1444,7 @@ FUNCTION_BLOCK FB_BrakovkaEmu
     IF rDelta_m >= 0.0 THEN
         udiPulseAdd := REAL_TO_UDINT(rDelta_m / rMetersPerPulse + 0.5);
         udiPulseCount := udiPulseCount + udiPulseAdd;
-    ELSIF rMetersPerPulse > 0.000000001 THEN
+    ELSE
         udiPulseSub := REAL_TO_UDINT((0.0 - rDelta_m) / rMetersPerPulse + 0.5);
         IF udiPulseCount >= udiPulseSub THEN
             udiPulseCount := udiPulseCount - udiPulseSub;
@@ -1413,21 +1477,19 @@ END_FUNCTION_BLOCK
 
 
 // ============================================================================
-// FB_Brakovka — единый ФБ для холста
+// FB_Brakovka — компактный ФБ для холста (~35 пинов)
+// Редко меняемые уставки — внутренние константы (см. VAR)
 // ============================================================================
 
-/// Brakovka: один ФБ — команды, ПЧ, тормоз, телеметрия
+/// Brakovka: компактный ФБ для FBD
 /// Brakovka
 /// Управление
 
 FUNCTION_BLOCK FB_Brakovka
 
     VAR_INPUT
-        /// Разрешение работы контроллера
         Enable               : BOOL;
-        /// Период задачи, мс
-        TaskPeriod_ms        : UDINT := 10;
-        (* --- команды оператора --- *)
+        (* команды *)
         CmdStart             : BOOL;
         CmdStop              : BOOL;
         CmdJog               : BOOL;
@@ -1436,92 +1498,45 @@ FUNCTION_BLOCK FB_Brakovka
         CmdResetRoll         : BOOL;
         CmdResetWound        : BOOL;
         CmdAutotune          : BOOL;
-        (* --- энкодер / датчики (реальный режим) --- *)
+        (* датчики / аварии *)
         PulseCount           : UDINT;
-        EncoderFault         : BOOL;
-        VfdFault             : BOOL;
-        ModbusFault          : BOOL;
-        (* --- эмуляция (brakovka_pi/emulation.py) --- *)
+        /// Общий бит аварии (энкодер ИЛИ ПЧ ИЛИ Modbus)
+        Fault                : BOOL;
         EmulatorEnable       : BOOL;
-        EmuGearRatio         : REAL := 20.0;
-        EmuMotorRpmPerHz     : REAL := 60.0;
-        EmuSpeedTau_s        : REAL := 0.15;
-        (* --- линейный счётчик энкодера --- *)
         MetersPerPulse       : REAL := 0.01;
-        (* --- рулон размотки --- *)
+        (* рулон / натяжение / скорость *)
         MaterialThickness_mm : REAL := 0.05;
         RollLength_m         : UDINT := 500;
         CoreDiameter_mm      : REAL := 76.0;
-        (* --- тормоз размотки --- *)
         TensionSetpoint_N    : REAL := 150.0;
-        BrakeGain_N          : REAL := 500.0;
-        BrakeMin_pct         : REAL := 2.0;
-        BrakeMax_pct         : REAL := 100.0;
-        (* --- уставки скорости --- *)
         SpeedSetpoint_mpm    : REAL := 100.0;
-        JogSpeed_mpm         : REAL := 10.0;
-        ReverseSpeed_mpm     : REAL := 15.0;
-        SlowdownSpeed_mpm    : REAL := 20.0;
-        MaxRampSpeed_mpm     : REAL := 300.0;
         TargetLength_m       : REAL := 500.0;
-        SlowdownStart_pct    : REAL := 90.0;
-        SlowdownExit_pct     : REAL := 85.0;
-        AccelTime_s          : REAL := 15.0;
-        DecelTime_s          : REAL := 10.0;
-        BrakeDelay_s         : REAL := 3.0;
-        (* --- PID / feedforward --- *)
+        (* PID Retain — после AutotuneDone: MOVE Active* → эти globals *)
         Kp                   : REAL := 1.0;
         Ti                   : REAL := 2.0;
         MpmPerHz             : REAL := 1.0;
-        (* --- фильтр скорости (опционально) --- *)
-        SpeedWindow_ms       : UDINT := 100;
-        FilterPidTau_ms      : UDINT := 80;
-        FilterDispTau_ms     : UDINT := 500;
-        MaxSpeed_mpm         : REAL := 300.0;
     END_VAR
 
     VAR_OUTPUT
-        (* --- ПЧ (железо) --- *)
+        (* железо *)
         VfdFreq_Hz           : REAL;
         VfdRun               : BOOL;
         VfdReverse           : BOOL;
-        (* --- тормоз (железо) --- *)
         BrakeValveCmd        : REAL;
-        (* --- автомат --- *)
+        (* HMI минимум *)
         State                : UDINT;
-        MotionActive         : BOOL;
-        StopHold             : BOOL;
         AllowRollEdit        : BOOL;
-        (* --- скорость (визуализация) --- *)
-        SpeedRaw_mpm         : REAL;
-        SpeedPid_mpm         : REAL;
         SpeedDisp_mpm        : REAL;
-        RampSpeed_mpm        : REAL;
-        SpeedValid           : BOOL;
-        (* --- метраж (визуализация) --- *)
         WoundLength_m        : REAL;
         WoundProgress_pct    : REAL;
-        UnwoundLength_m      : REAL;
-        RemainingLength_m    : REAL;
-        (* --- рулон (визуализация) --- *)
         UnwindDiameter_mm    : REAL;
-        StartDiameter_mm     : REAL;
-        (* --- тормоз (визуализация) --- *)
-        BrakeDisplay_pct     : REAL;
-        Tension_N            : REAL;
-        (* --- автонастройка --- *)
         AutotuneActive       : BOOL;
         AutotuneDone         : BOOL;
         AutotuneFailed       : BOOL;
+        AutotuneFailCode     : UDINT;
         ActiveKp             : REAL;
         ActiveTi             : REAL;
         ActiveMpmPerHz       : REAL;
-        (* --- эмуляция (визуализация / отладка) --- *)
-        EmulatorActive       : BOOL;
-        VfdStatusWord        : UDINT;
-        VfdFreqOut_Hz        : REAL;
-        SimSpeed_mpm         : REAL;
-        ConsumerDiameter_mm  : REAL;
     END_VAR
 
     VAR
@@ -1538,6 +1553,33 @@ FUNCTION_BLOCK FB_Brakovka
         xEmuRun              : BOOL;
         xEmuReverse          : BOOL;
         xEmuResetWound       : BOOL;
+        xFaultUse            : BOOL;
+        (* --- внутренние уставки (не на холсте) --- *)
+        udiTask_ms           : UDINT := 10;
+        udiSpeedWindow_ms    : UDINT := 100;
+        udiFilterPidTau_ms   : UDINT := 80;
+        udiFilterDispTau_ms  : UDINT := 500;
+        rMaxSpeed_mpm        : REAL := 300.0;
+        rJogSpeed_mpm        : REAL := 10.0;
+        rReverseSpeed_mpm    : REAL := 15.0;
+        rSlowdownSpeed_mpm   : REAL := 20.0;
+        rMaxRampSpeed_mpm    : REAL := 300.0;
+        rSlowdownStart_pct   : REAL := 90.0;
+        rSlowdownExit_pct    : REAL := 85.0;
+        rAccelTime_s         : REAL := 15.0;
+        rDecelTime_s         : REAL := 10.0;
+        rBrakeDelay_s        : REAL := 3.0;
+        rPiCorrMax_Hz        : REAL := 20.0;
+        rAutotuneStep_Hz     : REAL := 12.0;
+        rAutotuneBaseline_s  : REAL := 2.0;
+        rAutotuneStepDur_s   : REAL := 10.0;
+        rAutotuneTimeout_s   : REAL := 40.0;
+        rBrakeGain_N         : REAL := 500.0;
+        rBrakeMin_pct        : REAL := 2.0;
+        rBrakeMax_pct        : REAL := 100.0;
+        rEmuGearRatio        : REAL := 20.0;
+        rEmuMotorRpmPerHz    : REAL := 60.0;
+        rEmuSpeedTau_s       : REAL := 0.15;
     END_VAR
 
     IF NOT Enable THEN
@@ -1556,33 +1598,18 @@ FUNCTION_BLOCK FB_Brakovka
         VfdRun := FALSE;
         VfdReverse := FALSE;
         BrakeValveCmd := 0.0;
-        MotionActive := FALSE;
-        StopHold := FALSE;
         AllowRollEdit := TRUE;
-        SpeedRaw_mpm := 0.0;
-        SpeedPid_mpm := 0.0;
         SpeedDisp_mpm := 0.0;
-        RampSpeed_mpm := 0.0;
-        SpeedValid := FALSE;
         WoundLength_m := 0.0;
         WoundProgress_pct := 0.0;
-        UnwoundLength_m := 0.0;
-        RemainingLength_m := 0.0;
         UnwindDiameter_mm := 0.0;
-        StartDiameter_mm := 0.0;
-        BrakeDisplay_pct := 0.0;
-        Tension_N := 0.0;
         AutotuneActive := FALSE;
         AutotuneDone := FALSE;
         AutotuneFailed := FALSE;
+        AutotuneFailCode := 0;
         ActiveKp := Kp;
         ActiveTi := Ti;
         ActiveMpmPerHz := MpmPerHz;
-        EmulatorActive := FALSE;
-        VfdStatusWord := 0;
-        VfdFreqOut_Hz := 0.0;
-        SimSpeed_mpm := 0.0;
-        ConsumerDiameter_mm := CoreDiameter_mm;
         rRollResetWound_m := 0.0;
         rUnwoundLength_m := 0.0;
         xApplyWoundReset := FALSE;
@@ -1593,10 +1620,9 @@ FUNCTION_BLOCK FB_Brakovka
         RETURN;
     END_IF
 
-    (* 0. Эмуляция: шаг с командами ПЧ предыдущего цикла *)
     IF EmulatorEnable THEN
         fbEmu.Enable               := TRUE;
-        fbEmu.TaskPeriod_ms        := TaskPeriod_ms;
+        fbEmu.TaskPeriod_ms        := udiTask_ms;
         fbEmu.VfdFreqCmd_Hz        := rEmuFreq_Hz;
         fbEmu.VfdRunCmd            := xEmuRun;
         fbEmu.VfdReverseCmd        := xEmuReverse;
@@ -1605,35 +1631,29 @@ FUNCTION_BLOCK FB_Brakovka
         fbEmu.MetersPerPulse       := MetersPerPulse;
         fbEmu.CoreDiameter_mm      := CoreDiameter_mm;
         fbEmu.MaterialThickness_mm := MaterialThickness_mm;
-        fbEmu.GearRatio            := EmuGearRatio;
-        fbEmu.MotorRpmPerHz        := EmuMotorRpmPerHz;
-        fbEmu.SpeedTau_s           := EmuSpeedTau_s;
+        fbEmu.GearRatio            := rEmuGearRatio;
+        fbEmu.MotorRpmPerHz        := rEmuMotorRpmPerHz;
+        fbEmu.SpeedTau_s           := rEmuSpeedTau_s;
         fbEmu();
-        xEmuResetWound  := FALSE;
+        xEmuResetWound := FALSE;
         udiPulseUsed := fbEmu.PulseCount;
-        EmulatorActive := TRUE;
-        VfdStatusWord := fbEmu.VfdStatusWord;
-        VfdFreqOut_Hz := fbEmu.VfdFreqOut_Hz;
-        SimSpeed_mpm := fbEmu.SimSpeed_mpm;
-        ConsumerDiameter_mm := fbEmu.ConsumerDiameter_mm;
+        xFaultUse := FALSE;
     ELSE
         udiPulseUsed := PulseCount;
-        EmulatorActive := FALSE;
-        VfdStatusWord := 0;
-        VfdFreqOut_Hz := 0.0;
-        SimSpeed_mpm := 0.0;
-        ConsumerDiameter_mm := 0.0;
+        xFaultUse := Fault;
+        fbEmu.Enable := FALSE;
+        fbEmu();
     END_IF
 
     fbSpeed.Enable           := TRUE;
     fbSpeed.Reset            := xApplyWoundReset;
     fbSpeed.PulseCount       := udiPulseUsed;
     fbSpeed.MetersPerPulse   := MetersPerPulse;
-    fbSpeed.TaskPeriod_ms    := TaskPeriod_ms;
-    fbSpeed.SpeedWindow_ms   := SpeedWindow_ms;
-    fbSpeed.FilterPidTau_ms  := FilterPidTau_ms;
-    fbSpeed.FilterDispTau_ms := FilterDispTau_ms;
-    fbSpeed.MaxSpeed_mpm     := MaxSpeed_mpm;
+    fbSpeed.TaskPeriod_ms    := udiTask_ms;
+    fbSpeed.SpeedWindow_ms   := udiSpeedWindow_ms;
+    fbSpeed.FilterPidTau_ms  := udiFilterPidTau_ms;
+    fbSpeed.FilterDispTau_ms := udiFilterDispTau_ms;
+    fbSpeed.MaxSpeed_mpm     := rMaxSpeed_mpm;
     fbSpeed();
     xApplyWoundReset := FALSE;
 
@@ -1646,41 +1666,40 @@ FUNCTION_BLOCK FB_Brakovka
     fbRoll.UnwoundLength_m      := rUnwoundLength_m;
     fbRoll();
 
-    fbMachine.Enable            := TRUE;
-    fbMachine.TaskPeriod_ms     := TaskPeriod_ms;
-    fbMachine.CmdStart          := CmdStart;
-    fbMachine.CmdStop           := CmdStop;
-    fbMachine.CmdJog            := CmdJog;
-    fbMachine.CmdReverse        := CmdReverse;
-    fbMachine.EstopOk           := EstopOk;
-    fbMachine.CmdResetRoll      := CmdResetRoll;
-    fbMachine.CmdResetWound     := CmdResetWound;
-    fbMachine.CmdAutotune       := CmdAutotune;
-    fbMachine.ActualSpeed_mpm   := fbSpeed.SpeedPid_mpm;
-    fbMachine.WoundLength_m     := fbSpeed.WoundLength_m;
-    IF EmulatorEnable THEN
-        fbMachine.VfdFault     := FALSE;
-        fbMachine.ModbusFault  := FALSE;
-        fbMachine.EncoderFault := FALSE;
-    ELSE
-        fbMachine.VfdFault     := VfdFault;
-        fbMachine.ModbusFault  := ModbusFault;
-        fbMachine.EncoderFault := EncoderFault;
-    END_IF
-    fbMachine.SpeedSetpoint_mpm := SpeedSetpoint_mpm;
-    fbMachine.JogSpeed_mpm      := JogSpeed_mpm;
-    fbMachine.ReverseSpeed_mpm  := ReverseSpeed_mpm;
-    fbMachine.SlowdownSpeed_mpm := SlowdownSpeed_mpm;
-    fbMachine.MaxRampSpeed_mpm  := MaxRampSpeed_mpm;
-    fbMachine.TargetLength_m    := TargetLength_m;
-    fbMachine.SlowdownStart_pct := SlowdownStart_pct;
-    fbMachine.SlowdownExit_pct  := SlowdownExit_pct;
-    fbMachine.AccelTime_s       := AccelTime_s;
-    fbMachine.DecelTime_s       := DecelTime_s;
-    fbMachine.BrakeDelay_s      := BrakeDelay_s;
-    fbMachine.Kp                := Kp;
-    fbMachine.Ti                := Ti;
-    fbMachine.MpmPerHz          := MpmPerHz;
+    fbMachine.Enable             := TRUE;
+    fbMachine.TaskPeriod_ms      := udiTask_ms;
+    fbMachine.CmdStart           := CmdStart;
+    fbMachine.CmdStop            := CmdStop;
+    fbMachine.CmdJog             := CmdJog;
+    fbMachine.CmdReverse         := CmdReverse;
+    fbMachine.EstopOk            := EstopOk;
+    fbMachine.CmdResetRoll       := CmdResetRoll;
+    fbMachine.CmdResetWound      := CmdResetWound;
+    fbMachine.CmdAutotune        := CmdAutotune;
+    fbMachine.ActualSpeed_mpm    := fbSpeed.SpeedPid_mpm;
+    fbMachine.WoundLength_m      := fbSpeed.WoundLength_m;
+    fbMachine.VfdFault           := xFaultUse;
+    fbMachine.ModbusFault        := xFaultUse;
+    fbMachine.EncoderFault       := xFaultUse;
+    fbMachine.SpeedSetpoint_mpm  := SpeedSetpoint_mpm;
+    fbMachine.JogSpeed_mpm       := rJogSpeed_mpm;
+    fbMachine.ReverseSpeed_mpm   := rReverseSpeed_mpm;
+    fbMachine.SlowdownSpeed_mpm  := rSlowdownSpeed_mpm;
+    fbMachine.MaxRampSpeed_mpm   := rMaxRampSpeed_mpm;
+    fbMachine.TargetLength_m     := TargetLength_m;
+    fbMachine.SlowdownStart_pct  := rSlowdownStart_pct;
+    fbMachine.SlowdownExit_pct   := rSlowdownExit_pct;
+    fbMachine.AccelTime_s        := rAccelTime_s;
+    fbMachine.DecelTime_s        := rDecelTime_s;
+    fbMachine.BrakeDelay_s       := rBrakeDelay_s;
+    fbMachine.PiCorrMax_Hz       := rPiCorrMax_Hz;
+    fbMachine.AutotuneStep_Hz    := rAutotuneStep_Hz;
+    fbMachine.AutotuneBaseline_s := rAutotuneBaseline_s;
+    fbMachine.AutotuneStepDur_s  := rAutotuneStepDur_s;
+    fbMachine.AutotuneTimeout_s  := rAutotuneTimeout_s;
+    fbMachine.Kp                 := Kp;
+    fbMachine.Ti                 := Ti;
+    fbMachine.MpmPerHz           := MpmPerHz;
     fbMachine();
 
     IF fbMachine.ResetRollPulse THEN
@@ -1711,9 +1730,9 @@ FUNCTION_BLOCK FB_Brakovka
     fbBrake.UnwindDiameter_mm   := fbRoll.Diameter_mm;
     fbBrake.StartDiameter_mm    := fbRoll.StartDiameter_mm;
     fbBrake.CoreDiameter_mm     := CoreDiameter_mm;
-    fbBrake.BrakeGain_N         := BrakeGain_N;
-    fbBrake.BrakeMin_pct        := BrakeMin_pct;
-    fbBrake.BrakeMax_pct        := BrakeMax_pct;
+    fbBrake.BrakeGain_N         := rBrakeGain_N;
+    fbBrake.BrakeMin_pct        := rBrakeMin_pct;
+    fbBrake.BrakeMax_pct        := rBrakeMax_pct;
     fbBrake.ControlActive       := fbMachine.TensionActive;
     fbBrake.StopHold            := fbMachine.StopHold;
     fbBrake();
@@ -1723,25 +1742,15 @@ FUNCTION_BLOCK FB_Brakovka
     VfdReverse        := fbMachine.VfdReverse;
     BrakeValveCmd     := fbBrake.ValveCmd;
     State             := fbMachine.State;
-    MotionActive      := fbMachine.MotionActive;
-    StopHold          := fbMachine.StopHold;
     AllowRollEdit     := fbMachine.AllowRollEdit;
-    SpeedRaw_mpm      := fbSpeed.SpeedRaw_mpm;
-    SpeedPid_mpm      := fbSpeed.SpeedPid_mpm;
     SpeedDisp_mpm     := fbSpeed.SpeedDisp_mpm;
-    RampSpeed_mpm     := fbMachine.RampSpeed_mpm;
-    SpeedValid        := fbSpeed.Valid;
     WoundLength_m     := fbSpeed.WoundLength_m;
     WoundProgress_pct := fbMachine.WoundProgress_pct;
-    UnwoundLength_m   := rUnwoundLength_m;
-    RemainingLength_m := fbRoll.RemainingLength_m;
     UnwindDiameter_mm := fbRoll.Diameter_mm;
-    StartDiameter_mm  := fbRoll.StartDiameter_mm;
-    BrakeDisplay_pct  := fbBrake.Display_pct;
-    Tension_N         := fbBrake.Tension_N;
     AutotuneActive    := fbMachine.AutotuneActive;
     AutotuneDone      := fbMachine.AutotuneDone;
     AutotuneFailed    := fbMachine.AutotuneFailed;
+    AutotuneFailCode  := fbMachine.AutotuneFailCode;
     ActiveKp          := fbMachine.ActiveKp;
     ActiveTi          := fbMachine.ActiveTi;
     ActiveMpmPerHz    := fbMachine.ActiveMpmPerHz;
@@ -1750,26 +1759,8 @@ END_FUNCTION_BLOCK
 
 
 // ============================================================================
-// ПОДКЛЮЧЕНИЕ на холсте FBD/LD (ПР без ST-программ): deploy/brk_globals.csv
-//
-//   1. Создать экземпляр FB_Brakovka на холсте (fbPlant).
-//   2. Связать входы/выходы с глобальными переменными (имена в CSV).
-//   3. Период задачи холста = iTaskPeriod_ms (обычно 10 мс).
-//
-//   fbPlant.Enable          := xEnable
-//   fbPlant.TaskPeriod_ms   := iTaskPeriod_ms
-//   fbPlant.EmulatorEnable  := xEmulatorEnable
-//   fbPlant.PulseCount      := udiEncPulseCount
-//   fbPlant.MetersPerPulse  := rMetersPerPulse   (* 0.01 = 1 см *)
-//   ... команды, уставки, аварии — см. brk_globals.csv
-//
-//   rVfdFreq_Hz     := fbPlant.VfdFreq_Hz
-//   xVfdRun         := fbPlant.VfdRun
-//   rSpeedDisp_mpm  := fbPlant.SpeedDisp_mpm
-//   udiState        := fbPlant.State
-//   ... телеметрия — см. brk_globals.csv
-//
-// Железо: VfdFreq_Hz, VfdRun, VfdReverse, BrakeValveCmd
-// HMI: State (0..5), SpeedDisp_mpm, WoundProgress_pct, UnwindDiameter_mm
-// После автонастройки сохраните rKp/rTi/rMpmPerHz из ActiveKp/ActiveTi/ActiveMpmPerHz
+// Проводка: deploy/owen_wiring.md + deploy/brk_globals.csv
+// FB_Brakovka: ~21 вход + ~16 выход. Задача холста 10 мс.
+// Fault := xEncFault OR xVfdFault OR xModbusFault (один OR на FBD).
+// После AutotuneDone: MOVE ActiveKp→rKp, ActiveTi→rTi, ActiveMpmPerHz→rMpmPerHz
 // ============================================================================
