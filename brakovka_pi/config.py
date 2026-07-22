@@ -3,22 +3,11 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from typing import Optional
 
 from .as5600 import AS5600_ADDR
 from .pid_tune import parse_pid_tune_method
 from .setpoints import SETPOINTS, clamp as sp_clamp
 from .settings import load_settings
-
-
-def _parse_rs485_de(raw: object) -> Optional[int]:
-    """null/0/negative in JSON → USB adapter (no GPIO DE)."""
-    if raw is None:
-        return None
-    if isinstance(raw, str) and raw.strip().lower() in ("", "none", "null"):
-        return None
-    pin = int(raw)  # type: ignore[arg-type]
-    return pin if pin > 0 else None
 
 
 def resolve_emulator(emu_from_file: bool) -> bool:
@@ -59,7 +48,7 @@ class GpioConfig:
 
 @dataclass(frozen=True)
 class SerialConfig:
-    port: str = "/dev/serial0"
+    port: str = "/dev/ttyUSB0"
     baudrate: int = 115200
     # Fixed 8N1 for Delta CP2000 Modbus RTU (not in settings.json).
     parity: str = "N"
@@ -68,17 +57,8 @@ class SerialConfig:
     timeout_s: float = 0.5
     retries: int = 3
     unit_id: int = 1
-    de_delay_before_tx_s: float = 0.002
-    de_turnaround_s: float = 0.003
-    # GPIO pin for software DE (SP3485 RSE). null = USB RS485 adapter (auto DE).
-    rs485_de: Optional[int] = 16
-    rs485_active_high: bool = True
     reconnect_period_s: float = 2.0
     fails_before_reconnect: int = 2
-
-
-# Default DE/RE pin (ordinary GPIO).
-RS485_DE_GPIO = 16
 
 
 @dataclass(frozen=True)
@@ -203,15 +183,11 @@ def load_runtime_config():
     )
 
     serial = SerialConfig(
-        port=str(s.serial.get("port", "/dev/serial0")),
+        port=str(s.serial.get("port", "/dev/ttyUSB0")),
         baudrate=int(s.serial.get("baudrate", 115200)),
         timeout_s=float(s.serial.get("timeout_s", 0.5)),
         retries=int(s.serial.get("retries", 3)),
         unit_id=int(s.serial.get("unit_id", 1)),
-        de_delay_before_tx_s=float(s.serial.get("de_delay_before_tx_s", 0.002)),
-        de_turnaround_s=float(s.serial.get("de_turnaround_s", 0.003)),
-        rs485_de=_parse_rs485_de(s.serial.get("rs485_de", 16)),
-        rs485_active_high=bool(s.serial.get("rs485_active_high", True)),
         reconnect_period_s=_clamp(float(s.serial.get("reconnect_period_s", 2.0)), 0.5, 60.0),
         fails_before_reconnect=max(1, int(s.serial.get("fails_before_reconnect", 2))),
     )
