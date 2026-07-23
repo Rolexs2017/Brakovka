@@ -14,10 +14,6 @@
     "timeout_s": 3,
     "retries": 3,
     "unit_id": 1,
-    "de_delay_before_tx_s": 0,
-    "de_turnaround_s": 0,
-    "rs485_de": null,
-    "rs485_active_high": true,
     "reconnect_period_s": 2.0,
     "fails_before_reconnect": 2
   },
@@ -28,6 +24,7 @@
   "ui": {
     "window_title": "Brakovka HMI",
     "fullscreen": true,
+    "gui_variant": "modern",
     "settings_password": "4444",
     "sounds_enabled": true
   },

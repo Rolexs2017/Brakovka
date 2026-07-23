@@ -4,9 +4,8 @@
 
 - Управление:
   - **Кнопки**: GPIO `23, 24, 25, 8, 7` (активный LOW, pull-up)
-  - **Частотный преобразователь намотки**: **RS485 Modbus RTU**
-    - **USB‑адаптер** (рекомендуется): `/dev/ttyUSB0` или `/dev/serial/by-id/...`, `rs485_de: null`
-    - **или** onboard UART: `TX=GPIO14`, `RX=GPIO15`, `DE/RE=GPIO16` (программный DE)
+  - **Частотный преобразователь намотки**: **USB RS485 Modbus RTU**
+    (`/dev/ttyUSB0` или `/dev/serial/by-id/...`; DE в адаптере)
   - **PWM тормоз размотки**: GPIO `13`
 - Взаимодействие с HMI/SCADA: **OPC‑UA server** (DWIN отсутствует)
 
@@ -18,34 +17,7 @@
 
 ## Быстрый старт (на Raspberry Pi OS)
 
-1) Включить UART и отключить консоль на нём:
-- `sudo raspi-config` → Interface Options → Serial → **Login shell: No**, **Serial port: Yes**
-- Проверьте, что `/dev/serial0` указывает на **ttyAMA0** (PL011), а не на **ttyS0** (mini-UART):
-
-```bash
-ls -l /dev/serial0
-# плохо:  serial0 -> ttyS0
-# хорошо: serial0 -> ttyAMA0
-```
-
-Если `-> ttyS0`, в `/boot/firmware/config.txt` (или `/boot/config.txt`) добавьте/проверьте:
-
-```
-enable_uart=1
-dtparam=uart0=on
-dtoverlay=disable-bt
-```
-
-DE на **GPIO16** (обычный GPIO). Не назначайте на этот пин альтернативную функцию.
-
-```bash
-pinctrl get 16
-# ожидается: INPUT/OUTPUT
-```
-
-Затем `sudo reboot`. Mini-UART на 115200 часто даёт «connected, но нет ответа» на Modbus.
-
-2) Установить зависимости:
+1) Установить зависимости:
 
 ```bash
 sudo apt update
@@ -53,7 +25,7 @@ sudo apt install -y python3 python3-pip
 python3 -m pip install -r requirements.txt
 ```
 
-3) GPIO на Debian 13 (Trixie) / Raspberry Pi OS Trixie:
+2) GPIO на Debian 13 (Trixie) / Raspberry Pi OS Trixie:
 
 На Trixie **нет `pigpiod`** в apt (ошибка `Can't connect to pigpio at localhost(8888)` —
 нормальна, если выбран factory pigpio). Используйте **lgpio**:
@@ -311,7 +283,7 @@ PID рассчитывает **частоту для частотника в Hz*
 На ПЧ: `Pr.00-20` = источник частоты RS‑485, `Pr.00-21` = команды RS‑485;
 `Pr.09-00` — адрес slave (`serial.unit_id`), `Pr.09-01` — baud.
 
-### USB RS485 (рекомендуется на Pi)
+### USB RS485 (на Pi)
 
 1. Подключите USB‑адаптер, найдите порт:
 
@@ -325,14 +297,11 @@ bash deploy/list_serial_ports.sh
 "serial": {
   "port": "/dev/serial/by-id/usb-ВАШ_АДАПТЕР-if00-port0",
   "baudrate": 115200,
-  "unit_id": 1,
-  "rs485_de": null,
-  "de_delay_before_tx_s": 0,
-  "de_turnaround_s": 0
+  "unit_id": 1
 }
 ```
 
-`rs485_de: null` — **без GPIO DE** (автопереключение в адаптере).
+DE переключается внутри USB‑адаптера (программный GPIO DE не используется).
 
 3. Права (один раз):
 
@@ -396,12 +365,7 @@ bash deploy/check_modbus.sh
 
 Кнопки ожидаются как **активный LOW** (подтяжка вверх).
 
-**RS485 — два варианта**
-
-1. **USB‑адаптер** (`rs485_de: null`): только A/B и GND к ПЧ; DE внутри адаптера.
-2. **SP3485 на GPIO** (`rs485_de: 16`): DI←14, RO→15, RSE←16; полярность `rs485_active_high`.
-
-Пин DE в `settings.json`: `serial.rs485_de` — число GPIO или `null` для USB.
+Связь с ПЧ — только через **USB RS485** адаптер (A/B + GND). Onboard UART / MAX485 / SP3485 не используются.
 
 ## Raspberry Pi: ярлык и обновление с ПК
 

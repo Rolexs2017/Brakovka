@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from brakovka_hmi.bridge import LocalBridge
+from brakovka_hmi.ui.gui import resolve_gui_variant
 from brakovka_pi.pid_tune import (
     PID_TUNE_METHOD_HINTS,
     PID_TUNE_METHOD_LABELS,
@@ -492,6 +493,11 @@ class SettingsScreen(EditableFormMixin, QWidget):
         clear_row.addWidget(self._clear_logs_hint, stretch=1)
         lay.addLayout(clear_row)
 
+        self._gui_hint = QLabel("")
+        self._gui_hint.setWordWrap(True)
+        self._gui_hint.setStyleSheet("color: #8aa4b8; font-size: 9pt;")
+        lay.addWidget(self._gui_hint)
+
         self._btn_quit = QPushButton("Закрыть приложение")
         self._btn_quit.setObjectName("cmdStop")
         self._btn_quit.setMinimumHeight(44)
@@ -804,6 +810,14 @@ class SettingsScreen(EditableFormMixin, QWidget):
         self._apply_settings(settings)
         self._refresh_emulator_ui()
         self._refresh_invert_ui(settings)
+        self._refresh_gui_hint(settings)
+
+    def _refresh_gui_hint(self, settings: dict) -> None:
+        variant = resolve_gui_variant(settings.get("ui"))
+        self._gui_hint.setText(
+            f"Интерфейс: «{variant}». Классический: ui.gui_variant = \"classic\" "
+            f"в settings.json или BRAKOVKA_GUI=classic при запуске. Нужен перезапуск."
+        )
 
     def _apply_settings(self, settings: dict) -> None:
         widgets = self._form_widgets_list
