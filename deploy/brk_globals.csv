@@ -1,44 +1,102 @@
 VariableName;VariableType;IsRetain;DefaultValue;Comment;MetaType;CatalogPath
 Имя переменной;Тип переменной;Энергонезависимость;Значение по умолчанию;Комментарий;Метатип;Путь в каталоге
-xEnable;Boolean;No;0;Разрешение FB_Brakovka.Enable;Ram;Brakovka/01_Система
-xCmdStart;Boolean;No;0;Импульс Пуск → CmdStart;Ram;Brakovka/02_Команды
-xCmdStop;Boolean;No;0;Импульс Стоп → CmdStop;Ram;Brakovka/02_Команды
-xCmdJog;Boolean;No;0;Уровень Толчок → CmdJog;Ram;Brakovka/02_Команды
-xCmdReverse;Boolean;No;0;Уровень Реверс → CmdReverse;Ram;Brakovka/02_Команды
-xCmdResetRoll;Boolean;No;0;Импульс сброс рулона → CmdResetRoll;Ram;Brakovka/02_Команды
-xCmdResetWound;Boolean;No;0;Импульс сброс намотки → CmdResetWound;Ram;Brakovka/02_Команды
-xCmdAutotune;Boolean;No;0;Импульс автонастройки → CmdAutotune;Ram;Brakovka/02_Команды
-xEstopOk;Boolean;No;1;E-STOP OK → EstopOk;Ram;Brakovka/03_Аварии
-xEncFault;Boolean;No;0;Авария энкодера (в OR на Fault);Ram;Brakovka/03_Аварии
-xVfdFault;Boolean;No;0;Авария ПЧ (в OR на Fault);Ram;Brakovka/03_Аварии
-xModbusFault;Boolean;No;0;Авария Modbus (в OR на Fault);Ram;Brakovka/03_Аварии
-xFault;Boolean;No;0;Fault = Enc OR Vfd OR Modbus → FB.Fault;Ram;Brakovka/03_Аварии
-udiEncPulseCount;Long;No;0;Счётчик импульсов → PulseCount;Ram;Brakovka/04_Энкодер
-rMetersPerPulse;Float;Yes;0.01;М/имп 0.01=1см → MetersPerPulse;Ram;Brakovka/04_Энкодер
-xEmulatorEnable;Boolean;Yes;0;Эмуляция → EmulatorEnable;Ram;Brakovka/05_Эмуляция
-rMaterialThickness_mm;Float;Yes;0.05;Толщина мм → MaterialThickness_mm;Ram;Brakovka/06_Рулон
-udiRollLength_m;Long;Yes;500;Метраж рулона м → RollLength_m;Ram;Brakovka/06_Рулон
-rCoreDiameter_mm;Float;Yes;76;Гильза мм → CoreDiameter_mm;Ram;Brakovka/06_Рулон
-rTensionSetpoint_N;Float;Yes;150;Натяжение Н → TensionSetpoint_N;Ram;Brakovka/07_Тормоз
-rSpeedSetpoint_mpm;Float;Yes;100;Уставка RUN м/мин → SpeedSetpoint_mpm;Ram;Brakovka/08_Скорость
-rTargetLength_m;Float;Yes;500;Целевая длина м → TargetLength_m;Ram;Brakovka/08_Скорость
-rKp;Float;Yes;1;Kp Retain вход. После Done ← ActiveKp;Ram;Brakovka/09_PID
-rTi;Float;Yes;2;Ti Retain вход. После Done ← ActiveTi;Ram;Brakovka/09_PID
-rMpmPerHz;Float;Yes;1;FF Retain вход. После Done ← ActiveMpmPerHz;Ram;Brakovka/09_PID
-rActiveKp;Float;No;1;Рабочий Kp ← ActiveKp;Ram;Brakovka/09_PID
-rActiveTi;Float;No;2;Рабочий Ti ← ActiveTi;Ram;Brakovka/09_PID
-rActiveMpmPerHz;Float;No;1;Рабочий MpmPerHz ← ActiveMpmPerHz;Ram;Brakovka/09_PID
-rVfdFreq_Hz;Float;No;0;Частота ПЧ ← VfdFreq_Hz;Ram;Brakovka/10_Выходы
-xVfdRun;Boolean;No;0;RUN ПЧ ← VfdRun;Ram;Brakovka/10_Выходы
-xVfdReverse;Boolean;No;0;Реверс ПЧ ← VfdReverse;Ram;Brakovka/10_Выходы
-rBrakeValveCmd;Float;No;0;Тормоз 0..1 ← BrakeValveCmd;Ram;Brakovka/10_Выходы
-udiState;Long;No;0;0IDLE 1RUN 2JOG 3REV 4SLOW 5STOP ← State;Ram;Brakovka/11_HMI
-xAllowRollEdit;Boolean;No;0;Правка рулона ← AllowRollEdit;Ram;Brakovka/11_HMI
-rSpeedDisp_mpm;Float;No;0;Скорость экран ← SpeedDisp_mpm;Ram;Brakovka/11_HMI
-rWoundLength_m;Float;No;0;Намотано м ← WoundLength_m;Ram;Brakovka/11_HMI
-rWoundProgress_pct;Float;No;0;Прогресс % ← WoundProgress_pct;Ram;Brakovka/11_HMI
-rUnwindDiameter_mm;Float;No;0;Диаметр размотки ← UnwindDiameter_mm;Ram;Brakovka/11_HMI
-xAutotuneActive;Boolean;No;0;Autotune идёт ← AutotuneActive;Ram;Brakovka/12_Автонастройка
-xAutotuneDone;Boolean;No;0;OK 1 скан ← AutotuneDone (+MOVE gains);Ram;Brakovka/12_Автонастройка
-xAutotuneFailed;Boolean;No;0;FAIL 1 скан ← AutotuneFailed;Ram;Brakovka/12_Автонастройка
-udiAutotuneFailCode;Long;No;0;0OK 1to 2smp 3step 4dy 5abr 6fop ← FailCode;Ram;Brakovka/12_Автонастройка
+udiTaskPeriod_ms;Long;No;10;Период мс -> TaskPeriod_ms всех ФБ;Ram;Brakovka/01_Sistema
+xEnable;Boolean;No;0;Разрешение -> Enable Mach Reg SpeedCalc Unwind Brake;Ram;Brakovka/01_Sistema
+xEmulatorEnable;Boolean;Yes;0;Эмуляция -> FB_BrakovkaEmu.Enable;Ram;Brakovka/01_Sistema
+xCmdStart;Boolean;No;0;Импульс Пуск -> CtrlMach.CmdStart;Ram;Brakovka/02_Komandy
+xCmdStop;Boolean;No;0;Импульс Стоп -> CtrlMach.CmdStop;Ram;Brakovka/02_Komandy
+xCmdJog;Boolean;No;0;Уровень Толчок -> CtrlMach.CmdJog;Ram;Brakovka/02_Komandy
+xCmdReverse;Boolean;No;0;Уровень Реверс -> CtrlMach.CmdReverse;Ram;Brakovka/02_Komandy
+xCmdResetRoll;Boolean;No;0;Импульс сброс рулона -> CtrlMach.CmdResetRoll;Ram;Brakovka/02_Komandy
+xCmdResetWound;Boolean;No;0;Импульс сброс намотки -> CtrlMach.CmdResetWound;Ram;Brakovka/02_Komandy
+xCmdAutotune;Boolean;No;0;Импульс autotune -> CtrlMach.CmdAutotune;Ram;Brakovka/02_Komandy
+xEstopOk;Boolean;No;1;E-STOP OK -> Mach.EstopOk и Reg.EstopOk;Ram;Brakovka/03_Avarii
+xEncFault;Boolean;No;0;Авария энкодера -> CtrlMach.EncoderFault;Ram;Brakovka/03_Avarii
+xVfdFault;Boolean;No;0;Авария ПЧ -> CtrlMach.VfdFault;Ram;Brakovka/03_Avarii
+xModbusFault;Boolean;No;0;Авария Modbus -> CtrlMach.ModbusFault;Ram;Brakovka/03_Avarii
+xFault;Boolean;No;0;HMI Enc OR Vfd OR Modbus;Ram;Brakovka/03_Avarii
+udiEncPulseCount;Long;No;0;Имп энкодера железо -> SpeedCalc.PulseCount;Ram;Brakovka/04_Encoder
+rMetersPerPulse;Float;Yes;0.01;М/имп 0.01=1см -> SpeedCalc и Emu;Ram;Brakovka/04_Encoder
+udiSpeedWindow_ms;Long;Yes;100;Окно скорости мс -> SpeedCalc.SpeedWindow_ms;Ram;Brakovka/04_Encoder
+udiFilterPidTau_ms;Long;Yes;80;EMA PID мс -> SpeedCalc.FilterPidTau_ms;Ram;Brakovka/04_Encoder
+udiFilterDispTau_ms;Long;Yes;500;EMA экран мс -> SpeedCalc.FilterDispTau_ms;Ram;Brakovka/04_Encoder
+rMaxSpeed_mpm;Float;Yes;300;Отсечение выбросов -> SpeedCalc.MaxSpeed_mpm;Ram;Brakovka/04_Encoder
+rSpeedPid_mpm;Float;No;0;<- SpeedCalc.SpeedPid -> Mach.Actual и Reg.Actual;Ram;Brakovka/04_Encoder
+rSpeedDisp_mpm;Float;No;0;<- SpeedCalc.SpeedDisp экран;Ram;Brakovka/04_Encoder
+rSpeedRaw_mpm;Float;No;0;<- SpeedCalc.SpeedRaw;Ram;Brakovka/04_Encoder
+rWoundLength_m;Float;No;0;<- SpeedCalc -> Mach.Wound и Unwind.Unwound;Ram;Brakovka/04_Encoder
+xSpeedValid;Boolean;No;0;<- SpeedCalc.Valid;Ram;Brakovka/04_Encoder
+xResetWoundPulse;Boolean;No;0;<- Mach.ResetWoundPulse -> SpeedCalc.Reset Emu;Ram;Brakovka/04_Encoder
+xResetRollPulse;Boolean;No;0;<- Mach.ResetRollPulse;Ram;Brakovka/04_Encoder
+rMaterialThickness_mm;Float;Yes;0.05;Толщина мм -> Unwind и Emu;Ram;Brakovka/06_Rulon
+udiRollLength_m;Long;Yes;500;Метраж рулона м -> Unwind.RollLength_m;Ram;Brakovka/06_Rulon
+rCoreDiameter_mm;Float;Yes;76;Гильза мм -> Unwind Brake Emu;Ram;Brakovka/06_Rulon
+rUnwindDiameter_mm;Float;No;0;<- Unwind.Diameter -> Brake;Ram;Brakovka/06_Rulon
+rStartDiameter_mm;Float;No;0;<- Unwind.StartDiameter -> Brake;Ram;Brakovka/06_Rulon
+rRemainingLength_m;Float;No;0;<- Unwind.RemainingLength_m;Ram;Brakovka/06_Rulon
+xUnwindValid;Boolean;No;0;<- Unwind.Valid;Ram;Brakovka/06_Rulon
+rTensionSetpoint_N;Float;Yes;150;Натяжение Н -> Brake.TensionSetpoint_N;Ram;Brakovka/07_Tormoz
+rBrakeGain_N;Float;Yes;500;Gain Н -> Brake.BrakeGain_N;Ram;Brakovka/07_Tormoz
+rBrakeMin_pct;Float;Yes;2;Мин % -> Brake.BrakeMin_pct;Ram;Brakovka/07_Tormoz
+rBrakeMax_pct;Float;Yes;100;Макс % -> Brake.BrakeMax_pct;Ram;Brakovka/07_Tormoz
+rBrakeValveCmd;Float;No;0;<- Brake.ValveCmd 0..1;Ram;Brakovka/07_Tormoz
+rBrakeDisplay_pct;Float;No;0;<- Brake.Display_pct;Ram;Brakovka/07_Tormoz
+rBrakeTension_N;Float;No;0;<- Brake.Tension_N;Ram;Brakovka/07_Tormoz
+xBrakeValid;Boolean;No;0;<- Brake.Valid;Ram;Brakovka/07_Tormoz
+rSpeedSetpoint_mpm;Float;Yes;100;Уставка RUN -> CtrlMach.SpeedSetpoint_mpm;Ram;Brakovka/08_Skorost
+rJogSpeed_mpm;Float;Yes;10;Уставка JOG -> CtrlMach.JogSpeed_mpm;Ram;Brakovka/08_Skorost
+rReverseSpeed_mpm;Float;Yes;15;Уставка REVERSE -> CtrlMach.ReverseSpeed_mpm;Ram;Brakovka/08_Skorost
+rSlowdownSpeed_mpm;Float;Yes;20;Уставка SLOWDOWN -> CtrlMach.SlowdownSpeed_mpm;Ram;Brakovka/08_Skorost
+rMaxRampSpeed_mpm;Float;Yes;300;Макс рамп -> CtrlMach.MaxRampSpeed_mpm;Ram;Brakovka/08_Skorost
+rTargetLength_m;Float;Yes;500;Целевая длина -> CtrlMach.TargetLength_m;Ram;Brakovka/08_Skorost
+rSlowdownStart_pct;Float;Yes;90;Вход slowdown % -> CtrlMach;Ram;Brakovka/08_Skorost
+rSlowdownExit_pct;Float;Yes;85;Выход slowdown % -> CtrlMach;Ram;Brakovka/08_Skorost
+rAccelTime_s;Float;Yes;15;Разгон с -> CtrlMach.AccelTime_s;Ram;Brakovka/08_Skorost
+rDecelTime_s;Float;Yes;10;Торможение с -> CtrlMach.DecelTime_s;Ram;Brakovka/08_Skorost
+rBrakeDelay_s;Float;Yes;3;Задержка STOPPING с -> CtrlMach.BrakeDelay_s;Ram;Brakovka/08_Skorost
+rRampSpeed_mpm;Float;No;0;<- Mach.RampSpeed -> Reg.Setpoint_mpm;Ram;Brakovka/08_Skorost
+xRegEnable;Boolean;No;0;<- Mach.RegEnable -> Reg.RegEnable;Ram;Brakovka/09_PID
+xAutotuneMode;Boolean;No;0;<- Mach.AutotuneMode -> Reg.AutotuneMode;Ram;Brakovka/09_PID
+xAutotuneStart;Boolean;No;0;<- Mach.AutotuneStart -> Reg.AutotuneStart;Ram;Brakovka/09_PID
+xAutotuneAbort;Boolean;No;0;<- Mach.AutotuneAbort -> Reg.AutotuneAbort;Ram;Brakovka/09_PID
+xAutotuneReset;Boolean;No;0;<- Mach.AutotuneReset -> Reg.AutotuneReset;Ram;Brakovka/09_PID
+rKp;Float;Yes;1;Kp Retain -> Reg.Kp после Done <- ActiveKp;Ram;Brakovka/09_PID
+rTi;Float;Yes;2;Ti Retain -> Reg.Ti после Done <- ActiveTi;Ram;Brakovka/09_PID
+rMpmPerHz;Float;Yes;1;FF Retain -> Reg.MpmPerHz после Done <- ActiveMpmPerHz;Ram;Brakovka/09_PID
+rPiCorrMax_Hz;Float;Yes;20;Лимит PI Гц -> Reg.PiCorrMax_Hz;Ram;Brakovka/09_PID
+rOutMinHz;Float;Yes;0;Мин частота -> Reg.OutMinHz;Ram;Brakovka/09_PID
+rOutMaxHz;Float;Yes;320;Макс частота -> Reg.OutMaxHz;Ram;Brakovka/09_PID
+rActiveKp;Float;No;1;<- Reg.ActiveKp;Ram;Brakovka/09_PID
+rActiveTi;Float;No;2;<- Reg.ActiveTi;Ram;Brakovka/09_PID
+rActiveMpmPerHz;Float;No;1;<- Reg.ActiveMpmPerHz;Ram;Brakovka/09_PID
+rAutotuneStep_Hz;Float;Yes;12;Ступенька Гц -> Reg.AutotuneStep_Hz;Ram;Brakovka/09_PID
+rAutotuneBaseline_s;Float;Yes;2;Baseline с -> Reg.AutotuneBaseline_s;Ram;Brakovka/09_PID
+rAutotuneStepDur_s;Float;Yes;10;Длительность ступеньки с -> Reg;Ram;Brakovka/09_PID
+rAutotuneTimeout_s;Float;Yes;40;Таймаут с -> Reg.AutotuneTimeout_s;Ram;Brakovka/09_PID
+rVfdFreq_Hz;Float;No;0;<- Reg.FreqCmd_Hz на ПЧ;Ram;Brakovka/10_Vykhody
+xVfdRunMach;Boolean;No;0;<- Mach.VfdRun рабочий режим;Ram;Brakovka/10_Vykhody
+xVfdRunReg;Boolean;No;0;<- Reg.RunVFD режим autotune;Ram;Brakovka/10_Vykhody
+xVfdRun;Boolean;No;0;Итог RUN на ПЧ SEL AutotuneActive;Ram;Brakovka/10_Vykhody
+xVfdReverse;Boolean;No;0;<- Mach.VfdReverse;Ram;Brakovka/10_Vykhody
+xTensionActive;Boolean;No;0;<- Mach.TensionActive -> Brake;Ram;Brakovka/10_Vykhody
+xStopHold;Boolean;No;0;<- Mach.StopHold -> Brake;Ram;Brakovka/10_Vykhody
+xMotionActive;Boolean;No;0;<- Mach.MotionActive;Ram;Brakovka/10_Vykhody
+udiState;Long;No;0;<- Mach.State 0IDLE..5STOP;Ram;Brakovka/11_HMI
+xAllowRollEdit;Boolean;No;0;<- Mach.AllowRollEdit;Ram;Brakovka/11_HMI
+rWoundProgress_pct;Float;No;0;<- Mach.WoundProgress_pct;Ram;Brakovka/11_HMI
+udiEmuPulseCount;Long;No;0;<- Emu.PulseCount -> SpeedCalc;Ram;Brakovka/11_HMI
+rSimSpeed_mpm;Float;No;0;<- Emu.SimSpeed_mpm;Ram;Brakovka/11_HMI
+rConsumerDiameter_mm;Float;No;0;<- Emu.ConsumerDiameter_mm;Ram;Brakovka/11_HMI
+udiVfdStatusWord;Long;No;0;<- Emu.VfdStatusWord;Ram;Brakovka/11_HMI
+rVfdFreqOut_Hz;Float;No;0;<- Emu.VfdFreqOut_Hz;Ram;Brakovka/11_HMI
+rEmuGearRatio;Float;Yes;20;Emu передача -> GearRatio;Ram;Brakovka/11_HMI
+rEmuMotorRpmPerHz;Float;Yes;60;Emu rpm/Гц -> MotorRpmPerHz;Ram;Brakovka/11_HMI
+rEmuSpeedTau_s;Float;Yes;0.15;Emu инерция с -> SpeedTau_s;Ram;Brakovka/11_HMI
+xAutotuneActive;Boolean;No;0;<- Mach.AutotuneActive для SEL RUN;Ram;Brakovka/12_Autotune
+xAutotuneBusy;Boolean;No;0;<- Reg.AutotuneBusy -> Mach.AutotuneBusy;Ram;Brakovka/12_Autotune
+xAutotuneDoneIn;Boolean;No;0;<- Reg.AutotuneDone -> Mach.AutotuneDoneIn;Ram;Brakovka/12_Autotune
+xAutotuneFailedIn;Boolean;No;0;<- Reg.AutotuneFailed -> Mach.AutotuneFailedIn;Ram;Brakovka/12_Autotune
+xAutotuneDone;Boolean;No;0;<- Mach.AutotuneDone MOVE gains 1 скан;Ram;Brakovka/12_Autotune
+xAutotuneFailed;Boolean;No;0;<- Mach.AutotuneFailed 1 скан;Ram;Brakovka/12_Autotune
+udiAutotunePhase;Long;No;0;<- Reg.AutotunePhase;Ram;Brakovka/12_Autotune
+udiAutotuneFailCode;Long;No;0;<- Reg.AutotuneFailCode;Ram;Brakovka/12_Autotune

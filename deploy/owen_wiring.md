@@ -1,83 +1,100 @@
-# Brakovka — проводка Owen Logic (компактный FB)
+# Brakovka — проводка Owen Logic
 
-**Rev 1.2.0 — 2026-07-22**
+**Rev 1.5.0 — 2026-07-23**
 
-`FB_Brakovka`: **~21 вход + ~16 выход** (вместо ~70).  
-Редко меняемые уставки (JOG/разгон/autotune step/…) — **внутри ФБ**.
+Задача: **10 мс**.
+
+## На холсте
+
+| Блок | Роль |
+|------|------|
+| `FB_SpeedCalc` | скорость / WoundLength |
+| `FB_UnwindRollDia` | диаметр размотки |
+| `FB_BrakeForce` | тормоз |
+| `FB_CtrlMach` | автомат, рамп, RUN/REV |
+| `FB_CtrlReg` | PI+FF + autotune → частота |
+| `FB_BrakovkaEmu` | опц. эмулятор |
+
+`FB_Ctrl` / `FB_MachineCtrl` / `FB_pid_reg` — **больше нет** (заменены).
 
 ---
 
 ## Импорт
 
 1. `brk_globals.csv`
-2. ФБ из `.txt` по порядку из заголовка
-3. На холсте **один** `FB_Brakovka`, задача **10 мс**
+2. По порядку:
+   `FC_LIMIT` → `FC_MaxR` → `FC_MinR` → `FC_Ema` → `FB_PI_Hz` → `FB_SpeedPI_FF` → `FB_AutoTune_PI_FF` → `FB_CtrlReg` → `FB_SpeedCalc` → `FB_UnwindRollDia` → `FB_BrakeForce` → `FB_BrakovkaEmu` → `FB_CtrlMach`
 
 ---
 
-## Минимальная схема FBD
+## Схема
 
-### Аварии → один пин
 ```
-xFault := xEncFault OR xVfdFault OR xModbusFault
-fbPlant.Fault := xFault
+SpeedCalc → ActualSpeed / WoundLength ──┐
+                                        ├→ FB_CtrlMach → Ramp / RegEnable / Autotune*
+Unwind → Brake ← TensionActive/StopHold ┤         │
+                                        │         ↓
+                                        └→ FB_CtrlReg → FreqCmd_Hz / Active* / AutotuneDone
+                                                  │
+                                                  ↓
+                                            VfdFreq / VfdRun (см. ниже)
 ```
 
-### Входы (обязательные)
-| Global | Пин |
-|--------|-----|
-| xEnable | Enable |
-| xCmdStart…Autotune | Cmd* |
-| xEstopOk | EstopOk |
-| udiEncPulseCount | PulseCount |
-| xFault | Fault |
-| xEmulatorEnable | EmulatorEnable |
-| rMetersPerPulse | MetersPerPulse |
-| rMaterialThickness_mm | MaterialThickness_mm |
-| udiRollLength_m | RollLength_m |
-| rCoreDiameter_mm | CoreDiameter_mm |
-| rTensionSetpoint_N | TensionSetpoint_N |
-| rSpeedSetpoint_mpm | SpeedSetpoint_mpm |
-| rTargetLength_m | TargetLength_m |
-| rKp / rTi / rMpmPerHz | Kp / Ti / MpmPerHz |
+### Связи Mach ↔ Reg
 
-### Выходы
-| Пин | Global |
-|-----|--------|
-| VfdFreq_Hz / VfdRun / VfdReverse | железо ПЧ |
-| BrakeValveCmd | тормоз |
-| State, AllowRollEdit, SpeedDisp_mpm | HMI |
-| WoundLength_m, WoundProgress_pct, UnwindDiameter_mm | HMI |
-| AutotuneActive/Done/Failed, AutotuneFailCode | HMI |
-| ActiveKp/Ti/MpmPerHz | телеметрия + MOVE |
+| От | К |
+|----|---|
+| Mach.RampSpeed_mpm | Reg.Setpoint_mpm |
+| Mach.RegEnable | Reg.RegEnable |
+| Mach.AutotuneMode | Reg.AutotuneMode |
+| Mach.AutotuneStart | Reg.AutotuneStart |
+| Mach.AutotuneAbort | Reg.AutotuneAbort |
+| Mach.AutotuneReset | Reg.AutotuneReset |
+| SpeedCalc.SpeedPid | Reg.Actual_mpm и Mach.ActualSpeed |
+| Reg.AutotuneBusy | Mach.AutotuneBusy |
+| Reg.AutotuneDone | Mach.AutotuneDoneIn |
+| Reg.AutotuneFailed | Mach.AutotuneFailedIn |
 
-### После AutotuneDone (1 скан)
+### Частота / RUN на ПЧ
+
 ```
-rKp       := ActiveKp
-rTi       := ActiveTi
+rVfdFreq_Hz := Reg.FreqCmd_Hz
+
+IF Mach.AutotuneActive THEN
+    xVfdRun := Reg.RunVFD
+ELSE
+    xVfdRun := Mach.VfdRun
+END_IF
+xVfdReverse := Mach.VfdReverse
+```
+
+На FBD: SEL / два AND+OR по `AutotuneActive`.
+
+### После AutotuneDone (с Mach или Reg)
+
+```
+rKp := ActiveKp
+rTi := ActiveTi
 rMpmPerHz := ActiveMpmPerHz
 ```
 
----
-
-## Внутри ФБ (не на холсте)
-
-| Параметр | Значение |
-|----------|----------|
-| TaskPeriod | 10 мс |
-| Jog / Reverse / Slowdown | 10 / 15 / 20 м/мин |
-| Accel / Decel / BrakeDelay | 15 / 10 / 3 с |
-| Slowdown % | 90 / 85 |
-| PiCorrMax | ±20 Гц |
-| Autotune step/base/dur/timeout | 12 Гц / 2 с / 10 с / 40 с |
-| BrakeGain | 500 Н |
-| Фильтры скорости | 100 / 80 / 500 мс |
-
-Чтобы изменить — правьте константы в `VAR` у `FB_Brakovka` и перезалейте ФБ.
+(`Active*` — выходы **FB_CtrlReg**)
 
 ---
 
-## HMI
+## Эмулятор
 
-Не больше **32 переменных на один экран** ПР.  
-Основные: State, SpeedDisp, Progress, Diameter, команды, Active*/Autotune.
+```
+Vfd* (пред. цикл) → Emu → PulseCount → SpeedCalc → Mach/Reg
+```
+
+---
+
+## Вложенность
+
+```
+FB_CtrlMach          (без вложенных ФБ)
+FB_CtrlReg
+  ├─ FB_SpeedPI_FF → FB_PI_Hz
+  └─ FB_AutoTune_PI_FF
+```
